@@ -1,0 +1,6 @@
+{
+  "name": "سامانه انبار پاپیتال",
+  "description": "سامانه انبارداری هوشمند پاپیتال شامل مدیریت پیشرفته کالاها، انبارها، گزارشات مالی سنجه میانگین متحرک و انبارگردانی دوره‌ای",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
