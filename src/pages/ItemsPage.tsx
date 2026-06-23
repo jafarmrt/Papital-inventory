@@ -487,13 +487,14 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
 
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm shadow flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
-            <div className="px-6 py-4 border-b flex justify-between items-center">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="px-6 py-4 border-b flex justify-between items-center shrink-0">
               <h3 className="font-bold text-lg">ثبت {type === 'product' ? 'محصول' : 'ماده اولیه'} جدید</h3>
               <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600">&times;</button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-              <div>
+            <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden">
+              <div className="p-6 space-y-4 overflow-y-auto">
+                <div>
                 <label className="block text-sm font-medium mb-1">نام</label>
                 <input required type="text" value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full border rounded-lg px-3 py-2" />
               </div>
@@ -646,14 +647,16 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
                   </div>
                 )}
               </div>
-              <div className="pt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border rounded-lg hover:bg-slate-50">انصراف</button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">ثبت و ذخیره</button>
+              </div>
+              <div className="p-4 border-t flex justify-end gap-2 bg-slate-50 shrink-0">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 border rounded-lg hover:bg-white bg-transparent">انصراف</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold">ثبت و ذخیره</button>
               </div>
             </form>
           </div>
         </div>
       )}
+
 
       <ConfirmModal 
         isOpen={confirmState.isOpen}

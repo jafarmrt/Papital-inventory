@@ -11,6 +11,8 @@ import ConfirmModal from '../components/ConfirmModal';
 // Print styles are added globally or inline
 export default function CreateInvoicePage({ user: currentUser }: { user: User }) {
   const [items, setItems] = useState<Item[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [itemPrices, setItemPrices] = useState<any[]>([]);
   const [docType, setDocType] = useState('invoice');
   const [status, setStatus] = useState('final'); // 'proforma' or 'final'
   const [location, setLocation] = useState<string>('safe');
@@ -53,6 +55,7 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
 
   useEffect(() => {
     fetchJson('/items').then(setItems).catch(console.error);
+    fetchJson('/customers').then(setCustomers).catch(console.error);
     fetchJson('/warehouses').then(whs => {
       setWarehouses(whs);
       if (whs.length > 0) {
@@ -62,6 +65,32 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
     fetchNextRef();
     loadProformas();
   }, []);
+
+  const handleCustomerSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    if (!val) {
+      setBuyerName(''); setBuyerCity(''); setBuyerPhone(''); setBuyerAddress('');
+      return;
+    }
+    const c = customers.find(c => c.id.toString() === val);
+    if (c) {
+      setBuyerName(c.name);
+      setBuyerCity(c.city);
+      setBuyerPhone(c.phone);
+      setBuyerAddress(c.address);
+    }
+  };
+
+  const handleItemSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setSelectedItem(val);
+    setDiscount(0);
+    setUnitPrice(0);
+    setItemPrices([]);
+    if (val) {
+      fetchJson(`/items/${val}/prices`).then(setItemPrices).catch();
+    }
+  };
 
   const handleAddItem = () => {
     if (!selectedItem) {
@@ -174,66 +203,66 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
     return (
       <div className="space-y-6">
         <div className="flex gap-4 mb-4 print:hidden">
-          <button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded flex items-center gap-2">
-            <Printer size={18} /> چاپ فاکتور
+          <button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded flex items-center gap-2 font-bold">
+            <Printer size={18} /> چاپ فاکتور (A4)
           </button>
-          <button onClick={() => setPrintedDoc(null)} className="border px-4 py-2 rounded">
+          <button onClick={() => setPrintedDoc(null)} className="border px-4 py-2 rounded hover:bg-slate-50 font-medium">
             بازگشت به فرم ثبت
           </button>
         </div>
         
         {/* Printable Area - strictly reproducing the layout from PDF */}
-        <div className="bg-white p-8 mx-auto w-[210mm] min-h-[297mm] shadow print:shadow-none print:w-full print:p-0 font-sans text-sm border">
-          <div className="bg-[#6c74ad] text-white flex justify-center py-4 mb-4 font-bold text-xl rounded-t-xl print:rounded-none" style={{ backgroundColor: '#6c74ad', printColorAdjust: 'exact' }}>
+        <div className="bg-white p-6 mx-auto w-full max-w-[200mm] shadow print:shadow-none print:w-full print:p-4 font-sans text-sm border print:border-none">
+          <div className="bg-[#6c74ad] text-white flex justify-center py-3 mb-4 font-bold text-lg rounded-t-xl print:rounded-none" style={{ backgroundColor: '#6c74ad', printColorAdjust: 'exact' }}>
             صورتحساب فروش کالا و خدمات (گالری پاپیتال)
             {printedDoc.status === 'proforma' && ' - پیش فاکتور'}
           </div>
-          <div className="flex justify-between items-center mb-1">
+          <div className="flex justify-between items-center mb-2 text-xs">
             <div className="font-bold">شماره فاکتور: {printedDoc.ref_number}</div>
             <div className="font-bold">تاریخ: {new Date(printedDoc.date).toLocaleDateString('fa-IR')}</div>
           </div>
           
-          <table className="w-full mb-6 border-collapse">
+          <table className="w-full mb-4 border-collapse print:text-[13px]">
             <tbody>
               <tr>
                 <td colSpan={4} className="bg-gray-100 text-center font-bold py-1 border" style={{ backgroundColor: '#f3f4f6', printColorAdjust: 'exact' }}>مشخصات فروشنده</td>
               </tr>
               <tr>
-                <td className="py-2 px-2 border w-1/4"><strong>نام فروشنده:</strong> گالری پاپیتال</td>
-                <td className="py-2 px-2 border w-1/4"><strong>استان / شهر:</strong> تهران / تهران</td>
-                <td colSpan={2} className="py-2 px-2 border"><strong>تلفن:</strong> 09308128622</td>
+                <td className="py-1 px-2 border w-1/4"><strong>نام فروشنده:</strong> گالری پاپیتال</td>
+                <td className="py-1 px-2 border w-1/4"><strong>استان / شهر:</strong> تهران / تهران</td>
+                <td colSpan={2} className="py-1 px-2 border"><strong>تلفن:</strong> 09308128622</td>
               </tr>
               <tr>
-                <td colSpan={4} className="py-2 px-2 border"><strong>نشانی:</strong> خیابان طالقانی، بن بست مسعود، پلاک 13</td>
+                <td colSpan={4} className="py-1 px-2 border"><strong>نشانی:</strong> خیابان طالقانی، بن بست مسعود، پلاک 13</td>
               </tr>
 
               <tr>
                 <td colSpan={4} className="bg-gray-100 text-center font-bold py-1 border mt-2" style={{ backgroundColor: '#f3f4f6', printColorAdjust: 'exact' }}>مشخصات خریدار</td>
               </tr>
               <tr>
-                <td className="py-2 px-2 border w-1/4"><strong>نام خریدار:</strong> {printedDoc.buyer_name}</td>
-                <td className="py-2 px-2 border w-1/4"><strong>استان / شهر:</strong> {printedDoc.buyer_city}</td>
-                <td colSpan={2} className="py-2 px-2 border"><strong>تلفن:</strong> {printedDoc.buyer_phone}</td>
+                <td className="py-1 px-2 border w-1/4"><strong>نام خریدار:</strong> {printedDoc.buyer_name}</td>
+                <td className="py-1 px-2 border w-1/4"><strong>استان / شهر:</strong> {printedDoc.buyer_city}</td>
+                <td colSpan={2} className="py-1 px-2 border"><strong>تلفن:</strong> {printedDoc.buyer_phone}</td>
               </tr>
               <tr>
-                <td colSpan={4} className="py-2 px-2 border"><strong>نشانی:</strong> {printedDoc.buyer_address}</td>
+                <td colSpan={4} className="py-1 px-2 border"><strong>نشانی:</strong> {printedDoc.buyer_address}</td>
               </tr>
             </tbody>
           </table>
 
-          <div className="bg-gray-100 text-center font-bold py-1 border border-b-0" style={{ backgroundColor: '#f3f4f6', printColorAdjust: 'exact' }}>مشخصات کالا یا خدمات مورد معامله</div>
-          <table className="w-full text-center border-collapse border">
+          <div className="bg-gray-100 text-center font-bold py-1 border border-b-0 print:text-[13px]" style={{ backgroundColor: '#f3f4f6', printColorAdjust: 'exact' }}>مشخصات کالا یا خدمات مورد معامله</div>
+          <table className="w-full text-center border-collapse border print:text-[12px] break-inside-auto">
             <thead>
               <tr className="bg-[#6c74ad] text-white" style={{ backgroundColor: '#6c74ad', printColorAdjust: 'exact' }}>
-                <th className="border p-2">ردیف</th>
-                <th className="border p-2">کد کالا</th>
-                <th className="border p-2">شرح کالا</th>
-                <th className="border p-2">تعداد</th>
-                <th className="border p-2">واحد</th>
-                <th className="border p-2">مبلغ واحد</th>
-                <th className="border p-2">مبلغ کل</th>
-                <th className="border p-2">تخفیف</th>
-                <th className="border p-2">مبلغ نهایی</th>
+                <th className="border p-1.5 font-medium">ردیف</th>
+                <th className="border p-1.5 font-medium">کد کالا</th>
+                <th className="border p-1.5 font-medium w-1/3">شرح کالا</th>
+                <th className="border p-1.5 font-medium">تعداد</th>
+                <th className="border p-1.5 font-medium">واحد</th>
+                <th className="border p-1.5 font-medium">مبلغ واحد</th>
+                <th className="border p-1.5 font-medium">مبلغ کل</th>
+                <th className="border p-1.5 font-medium">تخفیف</th>
+                <th className="border p-1.5 font-medium">مبلغ نهایی</th>
               </tr>
             </thead>
             <tbody>
@@ -241,32 +270,26 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
                 const total = item.quantity * item.unit_price;
                 const final = total - item.discount;
                 return (
-                  <tr key={item.id} className="h-8">
-                    <td className="border p-1">{idx + 1}</td>
-                    <td className="border p-1" dir="ltr">{item.code}</td>
-                    <td className="border p-1">{item.name}</td>
+                  <tr key={item.id} className="h-7 hover:bg-slate-50 break-inside-avoid">
+                    <td className="border p-1 font-medium bg-slate-50">{idx + 1}</td>
+                    <td className="border p-1 font-mono text-[11px]" dir="ltr">{item.code}</td>
+                    <td className="border p-1 font-bold">{item.name}</td>
                     <td className="border p-1">{item.quantity}</td>
                     <td className="border p-1">{item.unit}</td>
                     <td className="border p-1">{item.unit_price.toLocaleString()}</td>
                     <td className="border p-1">{total.toLocaleString()}</td>
                     <td className="border p-1">{item.discount > 0 ? item.discount.toLocaleString() : ''}</td>
-                    <td className="border p-1">{final.toLocaleString()}</td>
+                    <td className="border p-1 font-bold bg-slate-50">{final.toLocaleString()}</td>
                   </tr>
                 );
               })}
-              {/* Fill empty rows to make it look full */}
-              {Array.from({ length: Math.max(0, 10 - printedDoc.items.length) }).map((_, i) => (
-                <tr key={'empty-'+i} className="h-8">
-                  <td className="border p-1"></td><td className="border"></td><td className="border"></td><td className="border"></td><td className="border"></td><td className="border"></td><td className="border"></td><td className="border"></td><td className="border"></td>
-                </tr>
-              ))}
             </tbody>
           </table>
 
-          <table className="w-full mt-4 border-collapse">
+          <table className="w-full mt-2 border-collapse print:text-[13px] break-inside-avoid">
             <tbody>
               <tr>
-                <td className="border p-2 align-top h-24" colSpan={4} rowSpan={3}>
+                <td className="border p-2 align-top h-20" colSpan={4} rowSpan={3}>
                   <strong>توضیحات:</strong> {printedDoc.notes}
                 </td>
                 <td className="border p-2 bg-gray-50 w-32 font-bold" style={{ backgroundColor: '#f9fafb', printColorAdjust: 'exact' }}>جمع کل:</td>
@@ -339,7 +362,14 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
 
           <div className="border-t pt-4">
             <h3 className="text-sm font-bold mb-3 text-slate-800">مشخصات خریدار</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+              <div className="col-span-1 md:col-span-4 bg-blue-50 p-3 rounded border border-blue-100 flex items-center gap-3">
+                <label className="text-sm font-bold text-blue-800 min-w-[120px]">انتخاب از مشتریان سابق:</label>
+                <select className="w-full max-w-sm border rounded px-3 py-1.5 focus:ring-1 focus:ring-blue-500 text-sm" onChange={handleCustomerSelect} defaultValue="">
+                  <option value="">-- مشتری جدید (ورود دستی) --</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name} {c.phone ? `(${c.phone})` : ''}</option>)}
+                </select>
+              </div>
               <div>
                 <label className="block text-xs mb-1 text-slate-500">نام خریدار</label>
                 <input type="text" value={buyerName} onChange={e=>setBuyerName(e.target.value)} className="w-full border rounded text-sm px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500" />
@@ -364,16 +394,26 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
             <div className="flex flex-wrap gap-3 items-end bg-slate-50 p-3 rounded-lg border">
               <div className="flex-1 min-w-[200px]">
                 <label className="block text-xs mb-1 text-slate-500">انتخاب کالا</label>
-                <select value={selectedItem} onChange={e => {
-                  setSelectedItem(e.target.value);
-                  // Auto-set zero discount and maybe focus unit price?
-                  setDiscount(0);
-                }} className="w-full border shadow-sm rounded text-sm px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                <select value={selectedItem} onChange={handleItemSelect} className="w-full border shadow-sm rounded text-sm px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
                   <option value="">- انتخاب کالا / ماده اولیه -</option>
                   {items.map(it => (
                     <option key={it.id} value={it.id} disabled={status === 'final' && it.current_stock <= 0}>
                       {it.code} - {it.name} (موجودی: {it.current_stock} {it.unit})
                     </option>
+                  ))}
+                </select>
+              </div>
+              <div className="w-48">
+                <label className="block text-xs mb-1 text-slate-500">سیاست قیمتی از پیش تعریف شده</label>
+                <select 
+                  className="w-full border shadow-sm rounded text-sm px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  onChange={e => e.target.value && setUnitPrice(Number(e.target.value))}
+                  disabled={!selectedItem || itemPrices.length === 0}
+                  defaultValue=""
+                >
+                  <option value="">-- ورود دستی قیمت --</option>
+                  {itemPrices.map(p => (
+                    <option key={p.id} value={p.price}>{p.title} - {p.price.toLocaleString()} {p.currency}</option>
                   ))}
                 </select>
               </div>

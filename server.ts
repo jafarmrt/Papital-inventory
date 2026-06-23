@@ -33,6 +33,80 @@ async function startServer() {
     }
   });
 
+  // Customers Endpoints
+  app.get('/api/customers', (req, res) => {
+    try {
+      const customers = db.prepare('SELECT * FROM customers ORDER BY name').all();
+      res.json(customers);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/customers', (req, res) => {
+    try {
+      const { name, phone = '', city = '', address = '', notes = '' } = req.body;
+      if (!name) return res.status(400).json({ error: 'نام مشتری الزامی است.' });
+      const stmt = db.prepare('INSERT INTO customers (name, phone, city, address, notes) VALUES (?, ?, ?, ?, ?)');
+      const info = stmt.run(name, phone, city, address, notes);
+      res.json({ id: info.lastInsertRowid, name, phone, city, address, notes });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Item Prices Endpoints
+  app.get('/api/items/:id/prices', (req, res) => {
+    try {
+      const prices = db.prepare('SELECT * FROM item_prices WHERE item_id = ? AND is_deleted = 0').all(req.params.id);
+      res.json(prices);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/items/:id/prices', (req, res) => {
+    try {
+      const { title, price, currency = 'IRR' } = req.body;
+      const itemId = req.params.id;
+      const stmt = db.prepare('INSERT INTO item_prices (item_id, title, price, currency, is_deleted) VALUES (?, ?, ?, ?, 0)');
+      const info = stmt.run(itemId, title, Number(price), currency);
+      res.json({ id: info.lastInsertRowid, itemId, title, price, currency });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/items/prices/bulk', (req, res) => {
+    try {
+      const { itemIds, percentage } = req.body;
+      if (!itemIds || !Array.isArray(itemIds)) return res.status(400).json({ error: 'invalid itemIds' });
+      
+      const multiplier = 1 + (percentage / 100);
+      const stmt = db.prepare('UPDATE item_prices SET price = price * ? WHERE item_id = ? AND is_deleted = 0');
+      
+      const updateMany = db.transaction((ids) => {
+        for (const id of ids) {
+          stmt.run(multiplier, id);
+        }
+      });
+      
+      updateMany(itemIds);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/items/:id/prices/:priceId', (req, res) => {
+    try {
+      db.prepare('UPDATE item_prices SET is_deleted = 1 WHERE id = ? AND item_id = ?').run(req.params.priceId, req.params.id);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Create an item
   app.post('/api/items', (req, res) => {
     try {
@@ -478,7 +552,7 @@ async function startServer() {
         LIMIT 5
       `).all(slowDays, deadDays);
 
-      // 4. Dead Stock (positive inventory but 0 'out' transactions in last dead_stock_days)
+      // 4. Dead Stock (positive inventory but 0 'out' transactions in last dead_stock_days, AND its first 'in' was older than dead_stock_days to prevent newly added ones from showing up as dead)
       const deadStock = db.prepare(`
         SELECT id, name, code, current_stock, unit, weighted_average_cost
         FROM items
@@ -487,9 +561,15 @@ async function startServer() {
             SELECT DISTINCT item_id FROM transactions t
             WHERE t.type = 'out' AND t.is_deleted = 0 AND t.date >= date('now', '-' || ? || ' days')
           )
+          AND id IN (
+            SELECT item_id FROM transactions t
+            WHERE t.type = 'in' AND t.is_deleted = 0
+            GROUP BY item_id
+            HAVING min(t.date) < date('now', '-' || ? || ' days')
+          )
         ORDER BY current_stock DESC
         LIMIT 5
-      `).all(deadDays);
+      `).all(deadDays, deadDays);
 
       // 5. Warehouse Valuation using Moving Average Cost
       const valuation = db.prepare(`

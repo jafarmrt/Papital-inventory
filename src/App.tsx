@@ -4,7 +4,7 @@
  */
 
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, Box, FileOutput, FileInput, History, Users, FileCode2, LogOut, Settings, ClipboardList } from 'lucide-react';
+import { LayoutDashboard, Package, Box, FileOutput, FileInput, History, Users, FileCode2, LogOut, Settings, ClipboardList, Image, DollarSign, UsersRound } from 'lucide-react';
 import { cn } from './utils';
 import { useState, useEffect } from 'react';
 import { useSearch } from './SearchContext';
@@ -19,6 +19,10 @@ import UsersPage from './pages/UsersPage';
 import ChangelogPage from './pages/ChangelogPage';
 import SettingsPage from './pages/SettingsPage';
 import InventoryAuditPage from './pages/InventoryAuditPage';
+import CreateInvoicePage from './pages/CreateInvoicePage';
+import CustomersPage from './pages/CustomersPage';
+import PricingPage from './pages/PricingPage';
+import GalleryPage from './pages/GalleryPage';
 import { User } from './types';
 
 function Sidebar({ user, onLogout }: { user: User, onLogout: () => void }) {
@@ -27,6 +31,9 @@ function Sidebar({ user, onLogout }: { user: User, onLogout: () => void }) {
     { name: 'داشبورد', path: '/', icon: LayoutDashboard },
     { name: 'محصولات', path: '/products', icon: Package },
     { name: 'مواد اولیه', path: '/materials', icon: Box },
+    { name: 'گالری اقلام', path: '/gallery', icon: Image },
+    { name: 'قیمت‌گذاری', path: '/pricing', icon: DollarSign },
+    { name: 'مشتریان', path: '/customers', icon: UsersRound },
     { name: 'رسید انبار (ورود)', path: '/receipts', icon: FileInput },
     { name: 'صدور فاکتور / حواله', path: '/remittances', icon: FileOutput },
     { name: 'انبارگردانی دوره‌ای', path: '/audit', icon: ClipboardList },
@@ -40,7 +47,7 @@ function Sidebar({ user, onLogout }: { user: User, onLogout: () => void }) {
   }
 
   return (
-    <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 h-screen">
+    <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 h-screen print:hidden">
       <div className="p-6 border-b border-slate-800">
         <div className="flex items-center gap-3 text-white">
           <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold text-lg">P</div>
@@ -109,7 +116,7 @@ export default function App() {
       <div className="flex bg-slate-50 min-h-screen text-slate-800 font-sans overflow-hidden" dir="rtl">
         <Sidebar user={user} onLogout={handleLogout} />
         <main className="flex-1 flex flex-col min-w-0">
-          <header className="h-16 bg-white border-b flex items-center justify-between px-6 shrink-0">
+          <header className="h-16 bg-white border-b flex items-center justify-between px-6 shrink-0 print:hidden">
             <div className="flex items-center gap-4 flex-1">
               <div className="relative w-96 font-sans">
                 <span className="absolute right-3 top-2.5 text-slate-400 text-sm">🔍</span>
@@ -132,11 +139,14 @@ export default function App() {
               </div>
             </div>
           </header>
-          <div className="p-6 overflow-auto flex-1">
+          <div className="p-6 print:p-0 overflow-auto flex-1 print:overflow-visible">
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/products" element={<ItemsPage type="product" title="مدیریت محصولات" user={user} />} />
               <Route path="/materials" element={<ItemsPage type="raw_material" title="مدیریت مواد اولیه" user={user} />} />
+              <Route path="/gallery" element={<GalleryPage user={user} />} />
+              <Route path="/pricing" element={<PricingPage user={user} />} />
+              <Route path="/customers" element={<CustomersPage user={user} />} />
               <Route path="/receipts" element={<DocumentsPage actionType="in" title="رسید ورود به انبار" user={user} />} />
               <Route path="/remittances" element={<CreateInvoicePage user={user} />} />
               <Route path="/audit" element={<InventoryAuditPage user={user} />} />

@@ -55,3 +55,20 @@ export interface Category {
   prefix: string;
   type: string;
 }
+
+export interface Customer {
+  id: number;
+  name: string;
+  phone: string;
+  city: string;
+  address: string;
+  notes: string;
+}
+
+export interface ItemPrice {
+  id: number;
+  item_id: number;
+  title: string;
+  price: number;
+  currency: string;
+}
