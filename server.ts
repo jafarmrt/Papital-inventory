@@ -1,13 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import db from './src/db.js';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
@@ -825,7 +821,7 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     // Production serving
-    const distPath = path.join(__dirname, 'dist');
+    const distPath = path.join(process.cwd(), 'dist');
     if (fs.existsSync(distPath)) {
       app.use(express.static(distPath));
       app.get('*', (req, res) => {
