@@ -84,26 +84,29 @@ function Sidebar({ user, onLogout }: { user: User, onLogout: () => void }) {
   );
 }
 
-import CreateInvoicePage from './pages/CreateInvoicePage';
-
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const { searchQuery, setSearchQuery } = useSearch();
 
   useEffect(() => {
-    const saved = localStorage.getItem('user');
-    if (saved) {
-      setUser(JSON.parse(saved));
+    const savedUser = localStorage.getItem('user');
+    const savedToken = localStorage.getItem('token');
+    if (savedUser && savedToken) {
+      setUser(JSON.parse(savedUser));
+    } else {
+      handleLogout();
     }
   }, []);
 
-  const handleLogin = (u: User) => {
+  const handleLogin = (u: User, token: string) => {
     localStorage.setItem('user', JSON.stringify(u));
+    localStorage.setItem('token', token);
     setUser(u);
   };
 
   const handleLogout = () => {
     localStorage.removeItem('user');
+    localStorage.removeItem('token');
     setUser(null);
   };
 
@@ -132,10 +135,10 @@ export default function App() {
             <div className="flex items-center gap-4">
               <div className="text-left">
                 <p className="text-xs text-slate-500 uppercase">{user.role === 'admin' ? 'مدیر سیستم' : user.role === 'manager' ? 'سرپرست انبار' : 'کاربر تماشاگر'}</p>
-                <p className="text-sm font-bold">{user.full_name}</p>
+                <p className="text-sm font-bold">{user.full_name || user.username}</p>
               </div>
               <div className="w-10 h-10 rounded-full bg-slate-200 border border-slate-300 flex flex-col items-center justify-center font-bold text-slate-500">
-                {user.full_name.charAt(0)}
+                {(user.full_name || user.username || '?').charAt(0)}
               </div>
             </div>
           </header>

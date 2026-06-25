@@ -3,7 +3,7 @@ import { fetchJson } from '../api';
 import { User } from '../types';
 import { Lock, User as UserIcon } from 'lucide-react';
 
-export default function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
+export default function LoginPage({ onLogin }: { onLogin: (user: User, token: string) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -16,7 +16,7 @@ export default function LoginPage({ onLogin }: { onLogin: (user: User) => void }
         body: JSON.stringify({ username, password })
       });
       if (res.success) {
-        onLogin(res.user);
+        onLogin(res.user, res.token);
       }
     } catch (err: any) {
       setError(err.message || 'خطا در ورود');
