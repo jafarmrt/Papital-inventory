@@ -20,6 +20,8 @@ import warehousesRoutes from './src/routes/warehouses.routes.js';
 import transactionsRoutes from './src/routes/transactions.routes.js';
 import dashboardRoutes from './src/routes/dashboard.routes.js';
 import documentsRoutes from './src/routes/documents.routes.js';
+import auditRoutes from './src/routes/audit.routes.js';
+import analyticsRoutes from './src/routes/analytics.routes.js';
 
 async function seedAdmin() {
   try {
@@ -69,6 +71,8 @@ async function startServer() {
   app.use('/api', transactionsRoutes);
   app.use('/api', dashboardRoutes);
   app.use('/api', documentsRoutes);
+  app.use('/api', auditRoutes);
+  app.use('/api', analyticsRoutes);
 
   // ======== Vite Middleware ========
   if (process.env.NODE_ENV !== 'production') {

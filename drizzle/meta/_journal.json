@@ -8,6 +8,13 @@
       "when": 1782297039061,
       "tag": "0000_same_wonder_man",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782485549648,
+      "tag": "0001_cool_red_hulk",
+      "breakpoints": true
     }
   ]
 }

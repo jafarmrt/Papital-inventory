@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { orm } from '../db/drizzle.js';
 import { users } from '../db/schema.js';
 import { generateToken } from '../middleware/auth.js';
+import { logAction } from '../middleware/auditLogger.js';
 
 const router = Router();
 
@@ -26,6 +27,8 @@ router.post('/login', async (req, res) => {
         const token = generateToken({ id: user.id, username: user.username, role: user.role });
         const { password: _, ...userWithoutPassword } = user;
         
+        await logAction(user.id, user.username, 'LOGIN', 'USER', user.id.toString(), { ip: req.ip });
+
         res.json({ success: true, user: { ...userWithoutPassword, full_name: user.fullName || user.username }, token });
       } else {
         res.status(401).json({ error: 'نام کاربری یا رمز عبور اشتباه است' });

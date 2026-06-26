@@ -20,6 +20,16 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
   });
 };
 
+export const authorizeRoles = (...allowedRoles: string[]) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const user = (req as any).user;
+    if (!user || (!allowedRoles.includes(user.role) && user.role !== 'admin')) {
+      return res.status(403).json({ error: 'شما دسترسی لازم برای این عملیات را ندارید.' });
+    }
+    next();
+  };
+};
+
 export const generateToken = (payload: any) => {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
 };

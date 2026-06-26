@@ -4,7 +4,7 @@
  */
 
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, Box, FileOutput, FileInput, History, Users, FileCode2, LogOut, Settings, ClipboardList, Image, DollarSign, UsersRound } from 'lucide-react';
+import { LayoutDashboard, Package, Box, FileOutput, FileInput, History, Users, FileCode2, LogOut, Settings, ClipboardList, Image, DollarSign, UsersRound, TrendingUp, Clock } from 'lucide-react';
 import { cn } from './utils';
 import { useState, useEffect } from 'react';
 import { useSearch } from './SearchContext';
@@ -23,6 +23,8 @@ import CreateInvoicePage from './pages/CreateInvoicePage';
 import CustomersPage from './pages/CustomersPage';
 import PricingPage from './pages/PricingPage';
 import GalleryPage from './pages/GalleryPage';
+import AnalyticsPage from './pages/AnalyticsPage';
+import AuditLogsPage from './pages/AuditLogsPage';
 import { User } from './types';
 
 function Sidebar({ user, onLogout }: { user: User, onLogout: () => void }) {
@@ -32,15 +34,23 @@ function Sidebar({ user, onLogout }: { user: User, onLogout: () => void }) {
     { name: 'محصولات', path: '/products', icon: Package },
     { name: 'مواد اولیه', path: '/materials', icon: Box },
     { name: 'گالری اقلام', path: '/gallery', icon: Image },
-    { name: 'قیمت‌گذاری', path: '/pricing', icon: DollarSign },
-    { name: 'مشتریان', path: '/customers', icon: UsersRound },
     { name: 'رسید انبار (ورود)', path: '/receipts', icon: FileInput },
     { name: 'صدور فاکتور / حواله', path: '/remittances', icon: FileOutput },
-    { name: 'انبارگردانی دوره‌ای', path: '/audit', icon: ClipboardList },
   ];
+
+  if (['admin', 'accountant', 'sales_manager'].includes(user.role)) {
+    menuItems.splice(4, 0, { name: 'مشتریان', path: '/customers', icon: UsersRound });
+    menuItems.splice(4, 0, { name: 'قیمت‌گذاری', path: '/pricing', icon: DollarSign });
+    menuItems.splice(1, 0, { name: 'هوش تجاری (BI)', path: '/analytics', icon: TrendingUp });
+  }
+
+  if (user.role === 'admin' || user.role === 'warehouse_keeper') {
+    menuItems.push({ name: 'انبارگردانی دوره‌ای', path: '/audit', icon: ClipboardList });
+  }
 
   if (user.role === 'admin') {
     menuItems.push({ name: 'گزارش تراکنش‌ها', path: '/transactions', icon: History });
+    menuItems.push({ name: 'تاریخچه فعالیت‌ها', path: '/audit-logs', icon: Clock });
     menuItems.push({ name: 'تنظیمات', path: '/settings', icon: Settings });
     menuItems.push({ name: 'مدیریت کاربران', path: '/users', icon: Users });
     menuItems.push({ name: 'تغییرات نسخه‌ها', path: '/changelog', icon: FileCode2 });
@@ -50,7 +60,7 @@ function Sidebar({ user, onLogout }: { user: User, onLogout: () => void }) {
     <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 h-screen print:hidden">
       <div className="p-6 border-b border-slate-800">
         <div className="flex items-center gap-3 text-white">
-          <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center font-bold text-lg">P</div>
+          <img src="/logo.png" alt="Logo" className="w-8 h-8 object-contain" />
           <h1 className="text-base font-bold tracking-tight">سامانه انبار پاپیتال</h1>
         </div>
       </div>
@@ -145,6 +155,7 @@ export default function App() {
           <div className="p-6 print:p-0 overflow-auto flex-1 print:overflow-visible">
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
               <Route path="/products" element={<ItemsPage type="product" title="مدیریت محصولات" user={user} />} />
               <Route path="/materials" element={<ItemsPage type="raw_material" title="مدیریت مواد اولیه" user={user} />} />
               <Route path="/gallery" element={<GalleryPage user={user} />} />
@@ -156,6 +167,7 @@ export default function App() {
               {user.role === 'admin' && (
                 <>
                   <Route path="/transactions" element={<TransactionsPage />} />
+                  <Route path="/audit-logs" element={<AuditLogsPage />} />
                   <Route path="/settings" element={<SettingsPage currentUser={user} />} />
                   <Route path="/users" element={<UsersPage currentUser={user} />} />
                   <Route path="/changelog" element={<ChangelogPage />} />

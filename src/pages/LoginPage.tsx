@@ -27,8 +27,8 @@ export default function LoginPage({ onLogin }: { onLogin: (user: User, token: st
     <div className="min-h-screen flex items-center justify-center bg-slate-50 font-sans" dir="rtl">
       <div className="bg-white p-8 rounded-xl shadow-sm border w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-white text-xl mx-auto mb-4">W</div>
-          <h1 className="text-2xl font-bold text-slate-800">سامانه انبارداری</h1>
+          <img src="/logo.png" alt="Logo" className="h-16 mx-auto mb-4 object-contain" />
+          <h1 className="text-2xl font-bold text-slate-800">سامانه انبار پاپیتال</h1>
           <p className="text-slate-500 mt-2 text-sm">لطفاً برای ورود اطلاعات خود را وارد کنید.</p>
         </div>
 

@@ -5,7 +5,18 @@ export const users = pgTable('users', {
   username: text('username').notNull().unique(),
   password: text('password').notNull(),
   fullName: text('full_name').notNull(),
-  role: text('role').notNull() // 'admin', 'manager', 'viewer'
+  role: text('role').notNull() // 'admin', 'warehouse_keeper', 'accountant', 'sales_manager', 'observer'
+});
+
+export const auditLogs = pgTable('audit_logs', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id'),
+  username: text('username'),
+  action: text('action').notNull(), // 'CREATE', 'UPDATE', 'DELETE', 'LOGIN'
+  entityType: text('entity_type').notNull(), // 'ITEM', 'TRANSACTION', 'USER', 'INVOICE'
+  entityId: text('entity_id'),
+  changes: jsonb('changes'),
+  timestamp: text('timestamp').notNull()
 });
 
 export const categories = pgTable('categories', {
