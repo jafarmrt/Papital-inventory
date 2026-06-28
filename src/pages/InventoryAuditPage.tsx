@@ -42,10 +42,11 @@ export default function InventoryAuditPage({ user }: { user: User }) {
       .catch(err => console.error(err));
 
     // 2. Fetch items
-    fetchJson('/items')
-      .then((data: any[]) => {
+    fetchJson('/items?limit=0')
+      .then((res: any) => {
+        const data = res.data || res;
         // Map items and compute system stock on selected location
-        const mapped = data.map(i => {
+        const mapped = data.map((i: any) => {
           const system_stock_computed = i[`stock_${selectedLocation}`] || 0;
 
           return {
@@ -83,7 +84,7 @@ export default function InventoryAuditPage({ user }: { user: User }) {
     setItems(prev => prev.map(item => {
       if (item.id === itemId) {
         // protect numerals
-        const sanitized = value.replace(/[^0-9]/g, '');
+        const sanitized = value.replace(/[^0-9.]/g, '');
         return {
           ...item,
           physical_stock: sanitized

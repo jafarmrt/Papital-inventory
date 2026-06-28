@@ -1,22 +1,68 @@
 import { Router } from 'express';
-import { sql, eq, and, desc, like } from 'drizzle-orm';
+import { sql, eq, and, desc, like, or } from 'drizzle-orm';
 import { orm } from '../db/drizzle.js';
 import { items, itemPrices, warehouses } from '../db/schema.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { z } from 'zod';
+import { validate } from '../middleware/validate.js';
+import { uploadBase64ToStorage } from '../lib/storage.js';
 
 const router = Router();
 router.use(authenticateToken);
+
+const itemCreateUpdateSchema = z.object({
+  body: z.object({
+    type: z.enum(['product', 'raw_material']).optional(),
+    name: z.string().min(2, 'نام کالا باید حداقل ۲ کاراکتر باشد'),
+    code: z.string().min(1, 'کد کالا الزامی است'),
+    unit: z.string().min(1, 'واحد اندازه گیری الزامی است'),
+    category: z.string().optional(),
+    image: z.string().optional(),
+    thumbnail: z.string().optional(),
+    reorder_point: z.union([z.string(), z.number()]).optional(),
+    weighted_average_cost: z.union([z.string(), z.number()]).optional()
+  }).passthrough()
+});
+
+const itemPriceSchema = z.object({
+  body: z.object({
+    title: z.string().min(1, 'عنوان قیمت الزامی است'),
+    price: z.union([z.string(), z.number()]),
+    currency: z.string().optional()
+  })
+});
 
 // ======== Items Endpoints ========
 router.get('/items', async (req, res) => {
   try {
     const type = req.query.type as string;
-    let query = orm.select().from(items).where(eq(items.isDeleted, 0)).orderBy(desc(items.id));
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 50;
+    const offset = (page - 1) * limit;
+    const search = req.query.search as string;
+    const isExport = req.query.export === 'true';
+
+    const conditions = [eq(items.isDeleted, 0)];
     
     if (type === 'product' || type === 'raw_material') {
-      query = orm.select().from(items).where(and(eq(items.isDeleted, 0), eq(items.type, type))).orderBy(desc(items.id));
+      conditions.push(eq(items.type, type));
     }
+
+    if (search) {
+      conditions.push(or(
+        like(items.name, `%${search}%`),
+        like(items.code, `%${search}%`)
+      ));
+    }
+
+    const whereClause = and(...conditions);
+
+    let query = orm.select().from(items).where(whereClause).orderBy(desc(items.id));
     
+    if (!isExport && limit > 0) {
+      query = query.limit(limit).offset(offset) as any;
+    }
+
     const fetchedItems = await query;
     
     // Format for frontend
@@ -30,13 +76,30 @@ router.get('/items', async (req, res) => {
         }
         return obj;
     });
-    res.json(mapped);
+
+    if (isExport) {
+      return res.json(mapped);
+    }
+
+    const totalCountQuery = await orm.select({ count: sql`count(*)`.mapWith(Number) })
+      .from(items)
+      .where(whereClause);
+    
+    const total = totalCountQuery[0].count;
+
+    res.json({
+      data: mapped,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-router.post('/items', async (req, res) => {
+router.post('/items', validate(itemCreateUpdateSchema), async (req, res) => {
   try {
     const { type, name, code, unit, category, image, thumbnail, reorder_point, weighted_average_cost } = req.body;
     
@@ -56,8 +119,11 @@ router.post('/items', async (req, res) => {
       computedStock += val;
     }
 
+    const imageUrl = image ? await uploadBase64ToStorage(image, 'image') : '';
+    const thumbnailUrl = thumbnail ? await uploadBase64ToStorage(thumbnail, 'thumbnail') : '';
+
     const [inserted] = await orm.insert(items).values({
-        type, name, code, unit, category: category || '', image: image || '', thumbnail: thumbnail || '',
+        type, name, code, unit, category: category || '', image: imageUrl, thumbnail: thumbnailUrl,
         reorderPoint: Number(reorder_point || 0), weightedAverageCost: Number(weighted_average_cost || 0),
         currentStock: computedStock,
         stocks: stockValues,
@@ -67,13 +133,16 @@ router.post('/items', async (req, res) => {
     const responseStock: any = {};
     for (const k of Object.keys(stockValues)) responseStock[`stock_${k}`] = stockValues[k];
 
-    res.json({ id: inserted.id, type, name, code, current_stock: computedStock, unit, category, image, thumbnail, ...responseStock, reorder_point, weighted_average_cost });
+    res.json({ id: inserted.id, type, name, code, current_stock: computedStock, unit, category, image: imageUrl, thumbnail: thumbnailUrl, ...responseStock, reorder_point, weighted_average_cost });
   } catch (err: any) {
+    if (err.code === '23505') {
+      return res.status(400).json({ error: 'کد کالا تکراری است.' });
+    }
     res.status(500).json({ error: err.message });
   }
 });
 
-router.put('/items/:id', async (req, res) => {
+router.put('/items/:id', validate(itemCreateUpdateSchema), async (req, res) => {
   try {
     const itemId = Number(req.params.id);
     const { name, code, unit, category, image, thumbnail, reorder_point, weighted_average_cost } = req.body;
@@ -94,15 +163,26 @@ router.put('/items/:id', async (req, res) => {
       stockValues[wh.code] = val;
     }
 
-    await orm.update(items).set({
-        name, code, unit, category: category || '', image: image || '', thumbnail: thumbnail || '',
+    const imageUrl = image ? await uploadBase64ToStorage(image, 'image') : undefined;
+    const thumbnailUrl = thumbnail ? await uploadBase64ToStorage(thumbnail, 'thumbnail') : undefined;
+
+    const updateData: any = {
+        name, code, unit, category: category || '',
         reorderPoint: Number(reorder_point || 0), weightedAverageCost: Number(weighted_average_cost || 0),
         currentStock: computedStock,
         stocks: stockValues
-    }).where(eq(items.id, itemId));
+    };
+    
+    if (imageUrl !== undefined) updateData.image = imageUrl;
+    if (thumbnailUrl !== undefined) updateData.thumbnail = thumbnailUrl;
+
+    await orm.update(items).set(updateData).where(eq(items.id, itemId));
     
     res.json({ success: true });
   } catch(err: any) {
+    if (err.code === '23505') {
+      return res.status(400).json({ error: 'کد کالا تکراری است.' });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -139,6 +219,20 @@ router.get('/items/next-product-code', async (req, res) => {
 });
 
 // ======== Item Prices ========
+router.get('/items/prices/all', async (req, res) => {
+  try {
+    const prices = await orm.select().from(itemPrices).where(eq(itemPrices.isDeleted, 0));
+    const grouped: Record<number, any[]> = {};
+    for (const p of prices) {
+      if (!grouped[p.itemId]) grouped[p.itemId] = [];
+      grouped[p.itemId].push(p);
+    }
+    res.json(grouped);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/items/:id/prices', async (req, res) => {
   try {
     const prices = await orm.select().from(itemPrices).where(and(eq(itemPrices.itemId, Number(req.params.id)), eq(itemPrices.isDeleted, 0)));
@@ -148,7 +242,7 @@ router.get('/items/:id/prices', async (req, res) => {
   }
 });
 
-router.post('/items/:id/prices', async (req, res) => {
+router.post('/items/:id/prices', validate(itemPriceSchema), async (req, res) => {
   try {
     const { title, price, currency = 'IRR' } = req.body;
     const itemId = Number(req.params.id);

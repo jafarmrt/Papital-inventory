@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../api';
+import { toast } from 'react-hot-toast';
 import { Item, User } from '../types';
 import { Plus, Trash2 } from 'lucide-react';
 import DatePicker from "react-multi-date-picker";
@@ -12,6 +13,8 @@ export default function DocumentsPage({ actionType, title, user: currentUser }: 
   const [refNumber, setRefNumber] = useState('');
   const [date, setDate] = useState<any>(new Date());
   const [user, setUser] = useState(currentUser.full_name);
+  const [warehouses, setWarehouses] = useState<{code: string, name: string}[]>([]);
+  const [location, setLocation] = useState('safe');
 
   const [selectedItem, setSelectedItem] = useState('');
   const [quantity, setQuantity] = useState<number | ''>('');
@@ -19,7 +22,16 @@ export default function DocumentsPage({ actionType, title, user: currentUser }: 
   const [docItems, setDocItems] = useState<{item: Item, quantity: number}[]>([]);
 
   useEffect(() => {
-    fetchJson('/items').then(setItems).catch(console.error);
+    fetchJson('/items?limit=0').then(res => {
+      if (res && res.data) setItems(res.data);
+      else if (Array.isArray(res)) setItems(res);
+    }).catch(console.error);
+    fetchJson('/warehouses').then(whs => {
+      setWarehouses(whs);
+      if (whs.length > 0) {
+        setLocation(whs[0].code);
+      }
+    }).catch(console.error);
     // reset form when actionType changes
     setDocType(actionType === 'in' ? 'receipt' : 'invoice');
     setDocItems([]);
@@ -28,18 +40,18 @@ export default function DocumentsPage({ actionType, title, user: currentUser }: 
 
   const handleAddItem = () => {
     if (!selectedItem) {
-      alert('لطفاً ابتدا کالا را انتخاب کنید.');
+      toast.error('لطفاً ابتدا کالا را انتخاب کنید.');
       return;
     }
     if (!quantity || Number(quantity) <= 0) {
-      alert('لطفاً تعداد کالا را وارد کنید (باید بیشتر از صفر باشد).');
+      toast.error('لطفاً تعداد کالا را وارد کنید (باید بیشتر از صفر باشد).');
       return;
     }
     const it = items.find(i => i.id.toString() === selectedItem);
     if (!it) return;
 
     if (actionType === 'out' && it.current_stock < Number(quantity)) {
-      alert(`موجودی کافی نیست! موجودی فعلی: ${it.current_stock}`);
+      toast.error(`موجودی کافی نیست! موجودی فعلی: ${it.current_stock}`);
       return;
     }
 
@@ -61,7 +73,7 @@ export default function DocumentsPage({ actionType, title, user: currentUser }: 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (docItems.length === 0) {
-      alert('هیچ کالایی اضافه نشده است.');
+      toast.error('هیچ کالایی اضافه نشده است.');
       return;
     }
 
@@ -83,18 +95,22 @@ export default function DocumentsPage({ actionType, title, user: currentUser }: 
           refNumber,
           date: formattedDate,
           user,
+          location,
           inOut: actionType,
           items: docItems.map(d => ({ itemId: d.item.id, quantity: d.quantity }))
         })
       });
-      alert('سند با موفقیت ثبت شد!');
+      toast.success('سند با موفقیت ثبت شد!');
       setDocItems([]);
       setRefNumber('');
       setUser('');
       // refresh items stock silently
-      fetchJson('/items').then(setItems).catch();
+      fetchJson('/items?limit=0').then(res => {
+        if (res && res.data) setItems(res.data);
+        else if (Array.isArray(res)) setItems(res);
+      }).catch(console.error);
     } catch (err: any) {
-      alert(err.message || 'خطا در ثبت سند');
+      toast.error(err.message || 'خطا در ثبت سند');
     }
   };
 
@@ -127,6 +143,14 @@ export default function DocumentsPage({ actionType, title, user: currentUser }: 
             <div>
               <label className="block text-xs font-medium mb-1 text-slate-500">شماره سند / رفرنس</label>
               <input required type="text" value={refNumber} onChange={e => setRefNumber(e.target.value)} className="w-full border rounded text-sm px-3 py-1.5 text-left font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" dir="ltr" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1 text-slate-500">انبار</label>
+              <select className="w-full border rounded text-sm px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500" value={location} onChange={e => setLocation(e.target.value)}>
+                {warehouses.map(wh => (
+                  <option key={wh.code} value={wh.code}>{wh.name}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-medium mb-1 text-slate-500">تاریخ</label>

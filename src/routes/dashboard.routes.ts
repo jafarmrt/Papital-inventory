@@ -12,7 +12,7 @@ router.get('/stats', async (req, res) => {
     const [{ count: totalProducts }] = await orm.select({ count: sql<number>`count(*)` }).from(items).where(and(eq(items.type, 'product'), eq(items.isDeleted, 0)));
     const [{ count: totalMaterials }] = await orm.select({ count: sql<number>`count(*)` }).from(items).where(and(eq(items.type, 'raw_material'), eq(items.isDeleted, 0)));
     const [{ count: lowStock }] = await orm.select({ count: sql<number>`count(*)` }).from(items).where(and(eq(items.isDeleted, 0), sql`${items.currentStock} <= COALESCE(${items.reorderPoint}, 5)`));
-    const [{ count: recentTx }] = await orm.select({ count: sql<number>`count(*)` }).from(transactions).where(and(eq(transactions.isDeleted, 0), sql`${transactions.date} >= current_date - interval '7 days'`));
+    const [{ count: recentTx }] = await orm.select({ count: sql<number>`count(*)` }).from(transactions).where(and(eq(transactions.isDeleted, 0), sql`${transactions.date} >= (current_date - interval '7 days')::text`));
     const [{ count: userCount }] = await orm.select({ count: sql<number>`count(*)` }).from(users);
 
     res.json({
@@ -110,7 +110,7 @@ router.get('/dashboard-bi-stats', async (req, res) => {
     }
 
     const trendsResult = await orm.execute(sql`
-      SELECT to_char(date::date, 'YYYY-MM') as month, type, SUM(quantity) as total
+      SELECT substring(date from 1 for 7) as month, type, SUM(quantity) as total
       FROM ${transactions}
       WHERE is_deleted = 0 AND date >= (current_date - interval '6 months')::text
       GROUP BY month, type

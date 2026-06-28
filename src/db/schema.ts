@@ -5,18 +5,7 @@ export const users = pgTable('users', {
   username: text('username').notNull().unique(),
   password: text('password').notNull(),
   fullName: text('full_name').notNull(),
-  role: text('role').notNull() // 'admin', 'warehouse_keeper', 'accountant', 'sales_manager', 'observer'
-});
-
-export const auditLogs = pgTable('audit_logs', {
-  id: serial('id').primaryKey(),
-  userId: integer('user_id'),
-  username: text('username'),
-  action: text('action').notNull(), // 'CREATE', 'UPDATE', 'DELETE', 'LOGIN'
-  entityType: text('entity_type').notNull(), // 'ITEM', 'TRANSACTION', 'USER', 'INVOICE'
-  entityId: text('entity_id'),
-  changes: jsonb('changes'),
-  timestamp: text('timestamp').notNull()
+  role: text('role').notNull() // 'admin', 'manager', 'viewer'
 });
 
 export const categories = pgTable('categories', {
@@ -49,6 +38,9 @@ export const changelogs = pgTable('changelogs', {
 export const customers = pgTable('customers', {
   id: serial('id').primaryKey(),
   name: text('name').notNull(),
+  contactName: text('contact_name').default(''),
+  country: text('country').default('ایران'),
+  province: text('province').default(''),
   phone: text('phone').default(''),
   city: text('city').default(''),
   address: text('address').default(''),
@@ -60,7 +52,7 @@ export const items = pgTable('items', {
   id: serial('id').primaryKey(),
   type: text('type').notNull(),
   name: text('name').notNull(),
-  code: text('code').notNull(),
+  code: text('code').notNull().unique(),
   currentStock: doublePrecision('current_stock').default(0),
   unit: text('unit').notNull(),
   category: text('category').default(''),
@@ -74,7 +66,8 @@ export const items = pgTable('items', {
 
 export const transactions = pgTable('transactions', {
   id: serial('id').primaryKey(),
-  itemId: integer('item_id').notNull(),
+  itemId: integer('item_id').notNull().references(() => items.id),
+  documentId: integer('document_id').references(() => documents.id),
   type: text('type').notNull(), // 'in' or 'out'
   quantity: doublePrecision('quantity').notNull(),
   date: text('date').notNull(),
@@ -103,8 +96,8 @@ export const documents = pgTable('documents', {
 
 export const documentItems = pgTable('document_items', {
   id: serial('id').primaryKey(),
-  documentId: integer('document_id').notNull(),
-  itemId: integer('item_id').notNull(),
+  documentId: integer('document_id').notNull().references(() => documents.id),
+  itemId: integer('item_id').notNull().references(() => items.id),
   quantity: doublePrecision('quantity').notNull(),
   unitPrice: doublePrecision('unit_price').default(0),
   discount: doublePrecision('discount').default(0),
@@ -113,7 +106,7 @@ export const documentItems = pgTable('document_items', {
 
 export const itemPrices = pgTable('item_prices', {
   id: serial('id').primaryKey(),
-  itemId: integer('item_id').notNull(),
+  itemId: integer('item_id').notNull().references(() => items.id),
   title: text('title').notNull(),
   price: doublePrecision('price').notNull(),
   currency: text('currency').default('IRR'),

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../api';
+import { toast } from 'react-hot-toast';
 import { Item, ItemPrice, User } from '../types';
 import { Search, Save, Trash2, Check } from 'lucide-react';
 import { cn } from '../utils';
@@ -21,16 +22,14 @@ export default function PricingPage({ user }: { user: User }) {
 
   const loadData = async () => {
     try {
-      const allItems = await fetchJson('/items?type=product');
+      const allItemsResponse = await fetchJson('/items?type=product&limit=0');
+      const allItems = allItemsResponse.data || allItemsResponse;
       setItems(allItems);
       
-      const newPrices: Record<number, ItemPrice[]> = {};
-      for (const item of allItems) {
-         try {
-           newPrices[item.id] = await fetchJson(`/items/${item.id}/prices`);
-         } catch(e) {}
-      }
-      setPrices(newPrices);
+      try {
+        const allPrices = await fetchJson('/items/prices/all');
+        setPrices(allPrices || {});
+      } catch(e) {}
       
       try {
         const settings = await fetchJson('/settings');
@@ -86,7 +85,7 @@ export default function PricingPage({ user }: { user: User }) {
         delete next[itemId];
         return next;
       });
-    } catch(err: any) { alert(err.message); }
+    } catch(err: any) { toast.error(err.message); }
     setSavingId(null);
   };
 
@@ -96,7 +95,7 @@ export default function PricingPage({ user }: { user: User }) {
       await fetchJson(`/items/${itemId}/prices/${priceId}`, { method: 'DELETE' });
       const currentPrices = await fetchJson(`/items/${itemId}/prices`);
       setPrices(prev => ({ ...prev, [itemId]: currentPrices }));
-    } catch(err: any) { alert(err.message); }
+    } catch(err: any) { toast.error(err.message); }
   };
 
   const filtered = items.filter(c => c.name.includes(search) || c.code.includes(search) || (c.category && c.category.includes(search)));
@@ -111,11 +110,11 @@ export default function PricingPage({ user }: { user: User }) {
         method: 'POST',
         body: JSON.stringify({ itemIds, percentage: Number(bulkPercent) })
       });
-      alert('با موفقیت بروزرسانی شد.');
+      toast.success('با موفقیت بروزرسانی شد.');
       setBulkMode(false);
       loadData();
     } catch(err: any) {
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 

@@ -59,6 +59,9 @@ export interface Category {
 export interface Customer {
   id: number;
   name: string;
+  contactName?: string;
+  country?: string;
+  province?: string;
   phone: string;
   city: string;
   address: string;

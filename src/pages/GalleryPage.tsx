@@ -11,8 +11,12 @@ export default function GalleryPage({ user }: { user: User }) {
 
   const loadData = async () => {
     try {
-      const allItems = await fetchJson(`/items?type=${tab}`);
-      setItems(allItems);
+      const res = await fetchJson(`/items?type=${tab}&limit=0`);
+      if (res && res.data) {
+        setItems(res.data);
+      } else if (Array.isArray(res)) {
+        setItems(res);
+      }
     } catch(err) {}
   };
 
@@ -24,8 +28,8 @@ export default function GalleryPage({ user }: { user: User }) {
   const withImages = items.filter(c => c.image || c.thumbnail);
   
   const filtered = withImages.filter(c => 
-    c.name.includes(search) || 
-    c.code.includes(search) || 
+    (c.name && c.name.includes(search)) || 
+    (c.code && c.code.includes(search)) || 
     (c.category && c.category.includes(search))
   );
 

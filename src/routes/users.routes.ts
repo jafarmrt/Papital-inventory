@@ -4,9 +4,37 @@ import { eq, desc } from 'drizzle-orm';
 import { orm } from '../db/drizzle.js';
 import { users } from '../db/schema.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { z } from 'zod';
+import { validate } from '../middleware/validate.js';
 
 const router = Router();
 router.use(authenticateToken); // Protect all user routes
+
+const userCreateSchema = z.object({
+  body: z.object({
+    username: z.string().min(3, 'نام کاربری باید حداقل ۳ کاراکتر باشد'),
+    password: z.string().min(6, 'رمز عبور باید حداقل ۶ کاراکتر باشد'),
+    full_name: z.string().optional(),
+    role: z.enum(['admin', 'manager', 'viewer']),
+  })
+});
+
+const userUpdateSchema = z.object({
+  body: z.object({
+    password: z.string().min(6, 'رمز عبور باید حداقل ۶ کاراکتر باشد').optional().or(z.literal('')),
+    full_name: z.string().optional(),
+    role: z.enum(['admin', 'manager', 'viewer']),
+  }),
+  params: z.object({
+    id: z.string().regex(/^\d+$/, 'شناسه باید عدد باشد')
+  })
+});
+
+const userParamsSchema = z.object({
+  params: z.object({
+    id: z.string().regex(/^\d+$/, 'شناسه باید عدد باشد')
+  })
+});
 
 // Users Management
 router.get('/users', async (req, res) => {
@@ -25,7 +53,7 @@ router.get('/users', async (req, res) => {
   }
 });
 
-router.post('/users', async (req, res) => {
+router.post('/users', validate(userCreateSchema), async (req, res) => {
   try {
     const { username, password, full_name, role } = req.body;
     const tUsername = (username || '').trim();
@@ -50,7 +78,7 @@ router.post('/users', async (req, res) => {
   }
 });
 
-router.put('/users/:id', async (req, res) => {
+router.put('/users/:id', validate(userUpdateSchema), async (req, res) => {
   try {
     const { password, full_name, role } = req.body;
     const updateData: any = { fullName: full_name, role };
@@ -67,7 +95,7 @@ router.put('/users/:id', async (req, res) => {
   }
 });
 
-router.delete('/users/:id', async (req, res) => {
+router.delete('/users/:id', validate(userParamsSchema), async (req, res) => {
   try {
     await orm.delete(users).where(eq(users.id, Number(req.params.id)));
     res.json({ success: true });

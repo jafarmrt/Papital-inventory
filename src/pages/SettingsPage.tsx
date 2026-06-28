@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { fetchJson } from '../api';
+import { toast } from 'react-hot-toast';
 import { Settings, Trash2, Edit2, Plus, AlertTriangle, List, FolderTree, Building2, Tags, ShieldAlert } from 'lucide-react';
 import { User, Category } from '../types';
 import ConfirmModal from '../components/ConfirmModal';
@@ -82,8 +83,8 @@ export default function SettingsPage({ currentUser }: { currentUser: User }) {
           ]
         })
       });
-      alert('تنظیمات عمومی با موفقیت ذخیره شد');
-    } catch(err) { alert('خطا در ذخیره تنظیمات'); }
+      toast.success('تنظیمات عمومی با موفقیت ذخیره شد');
+    } catch(err) { toast.error('خطا در ذخیره تنظیمات'); }
   };
 
   const handleCatSubmit = async (e: React.FormEvent) => {
@@ -97,7 +98,7 @@ export default function SettingsPage({ currentUser }: { currentUser: User }) {
       setShowCatModal(false);
       setCatForm({ id: 0, name: '', prefix: '', type: 'raw_material' });
       loadCategories();
-    } catch (err: any) { alert(err.message || 'خطا در ثبت'); }
+    } catch (err: any) { toast.error(err.message || 'خطا در ثبت'); }
   };
 
   const handleCatDelete = async (id: number) => { setConfirmState({ isOpen: true, catId: id }); };
@@ -106,7 +107,7 @@ export default function SettingsPage({ currentUser }: { currentUser: User }) {
       await fetchJson(`/categories/${confirmState.catId}`, { method: 'DELETE' });
       loadCategories();
       setConfirmState({ isOpen: false, catId: 0 });
-    } catch (err: any) { alert('خطا در حذف'); }
+    } catch (err: any) { toast.error('خطا در حذف'); }
   };
 
   const handleWhSubmit = async (e: React.FormEvent) => {
@@ -120,7 +121,7 @@ export default function SettingsPage({ currentUser }: { currentUser: User }) {
       setShowWhModal(false);
       setWhForm({ id: 0, name: '', code: '' });
       loadWarehouses();
-    } catch (err: any) { alert(err.message || 'خطا در ثبت انبار'); }
+    } catch (err: any) { toast.error(err.message || 'خطا در ثبت انبار'); }
   };
 
   const handleWhDelete = (id: number) => { setWhConfirmState({ isOpen: true, whId: id }); };
@@ -129,16 +130,16 @@ export default function SettingsPage({ currentUser }: { currentUser: User }) {
       await fetchJson(`/warehouses/${whConfirmState.whId}`, { method: 'DELETE' });
       loadWarehouses();
       setWhConfirmState({ isOpen: false, whId: 0 });
-    } catch (err: any) { alert(err.message || 'خطا در حذف انبار'); }
+    } catch (err: any) { toast.error(err.message || 'خطا در حذف انبار'); }
   };
 
   const handleClearData = async () => {
-    if (prompt(`برای تایید کلمه DELETE را وارد کنید`) !== 'DELETE') return alert('عملیات لغو شد');
+    if (prompt(`برای تایید کلمه DELETE را وارد کنید`) !== 'DELETE') return toast.error('عملیات لغو شد');
     try {
       await fetchJson('/admin/clear-data', { method: 'POST', body: JSON.stringify({ mode: clearMode }) });
-      alert('اطلاعات با موفقیت پاک شد');
+      toast.success('اطلاعات با موفقیت پاک شد');
       setShowClearModal(false);
-    } catch (err: any) { alert(err.message || 'خطا در عملیات پاکسازی'); }
+    } catch (err: any) { toast.error(err.message || 'خطا در عملیات پاکسازی'); }
   };
 
   if (currentUser.role !== 'admin' && currentUser.role !== 'manager') {

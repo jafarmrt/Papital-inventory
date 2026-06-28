@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { fetchJson } from '../api';
+import { toast } from 'react-hot-toast';
 import { Item, User } from '../types';
 import { Plus, Trash2, Printer } from 'lucide-react';
 import DatePicker from "react-multi-date-picker";
@@ -54,8 +55,14 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
   }
 
   useEffect(() => {
-    fetchJson('/items').then(setItems).catch(console.error);
-    fetchJson('/customers').then(setCustomers).catch(console.error);
+    fetchJson('/items?limit=0').then(res => {
+      if (res && res.data) setItems(res.data);
+      else if (Array.isArray(res)) setItems(res);
+    }).catch(console.error);
+    fetchJson('/customers?limit=0').then(res => {
+      if (res && res.data) setCustomers(res.data);
+      else if (Array.isArray(res)) setCustomers(res);
+    }).catch(console.error);
     fetchJson('/warehouses').then(whs => {
       setWarehouses(whs);
       if (whs.length > 0) {
@@ -94,11 +101,11 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
 
   const handleAddItem = () => {
     if (!selectedItem) {
-      alert('لطفاً ابتدا کالا را انتخاب کنید.');
+      toast.error('لطفاً ابتدا کالا را انتخاب کنید.');
       return;
     }
     if (!quantity || Number(quantity) <= 0) {
-      alert('لطفاً تعداد کالا را وارد کنید (باید بیشتر از صفر باشد).');
+      toast.error('لطفاً تعداد کالا را وارد کنید (باید بیشتر از صفر باشد).');
       return;
     }
     const it = items.find(i => i.id.toString() === selectedItem);
@@ -108,7 +115,7 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
       const locationStock = (it as any)[`stock_${location}`] || 0;
       if (locationStock < Number(quantity)) {
         const whName = warehouses.find(w => w.code === location)?.name || location;
-        alert(`عدم موجودی کافی در انبار انتخابی! موجودی ${whName}: ${locationStock} ${it.unit}`);
+        toast.error(`عدم موجودی کافی در انبار انتخابی! موجودی ${whName}: ${locationStock} ${it.unit}`);
         return;
       }
     }
@@ -133,7 +140,7 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (docItems.length === 0) {
-      alert('هیچ کالایی اضافه نشده است.');
+      toast.error('هیچ کالایی اضافه نشده است.');
       return;
     }
 
@@ -165,7 +172,7 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
           items: docItems.map(d => ({ itemId: d.item.id, quantity: d.quantity, unit_price: d.unitPrice, discount: d.discount }))
         })
       });
-      alert('سند با موفقیت ثبت شد!');
+      toast.success('سند با موفقیت ثبت شد!');
       
       const docDetails = await fetchJson(`/documents/${res.docId}`);
       setPrintedDoc(docDetails);
@@ -178,9 +185,12 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
       setBuyerAddress('');
       setNotes('');
       fetchNextRef();
-      fetchJson('/items').then(setItems).catch();
+      fetchJson('/items?limit=0').then(res => {
+        if (res && res.data) setItems(res.data);
+        else if (Array.isArray(res)) setItems(res);
+      }).catch();
     } catch (err: any) {
-      alert(err.message || 'خطا در ثبت سند');
+      toast.error(err.message || 'خطا در ثبت سند');
     }
   };
 
@@ -188,11 +198,14 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
     const docId = confirmState.docId;
     try {
       await fetchJson(`/documents/${docId}/finalize`, { method: 'PUT', body: JSON.stringify({ user: currentUser.full_name }) });
-      alert('فاکتور نهایی شد.');
+      toast.success('فاکتور نهایی شد.');
       loadProformas();
-      fetchJson('/items').then(setItems).catch();
+      fetchJson('/items?limit=0').then(res => {
+        if (res && res.data) setItems(res.data);
+        else if (Array.isArray(res)) setItems(res);
+      }).catch();
       setConfirmState({ isOpen: false, docId: 0 });
-    } catch(err) { alert('خطا در عملیات'); }
+    } catch(err) { toast.error('خطا در عملیات'); }
   };
 
   const totalSum = docItems.reduce((acc, curr) => acc + (curr.quantity * curr.unitPrice), 0);

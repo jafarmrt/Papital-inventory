@@ -191,7 +191,7 @@ export default function Dashboard() {
                 <p className="text-xs text-slate-500 font-medium">مواد اولیه با آلارم نقطه سفارش</p>
                 <div className="flex items-end justify-between mt-2">
                   <span className={`text-2xl font-extrabold ${biStats && biStats.reorderAlarms.length > 0 ? "text-rose-600" : "text-slate-800"}`}>
-                    {biStats ? biStats.reorderAlarms.length : '0'} Line
+                    {biStats ? biStats.reorderAlarms.length : '0'} قلم
                   </span>
                   {biStats && biStats.reorderAlarms.length > 0 && (
                     <span className="text-[10px] bg-rose-100 text-rose-700 font-bold px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
@@ -226,7 +226,7 @@ export default function Dashboard() {
                 <p className="text-xs text-slate-400 font-medium opacity-80">گردش کل اسناد (۷ روز اخیر)</p>
                 <div className="flex items-end justify-between mt-2">
                   <span className="text-2xl font-extrabold text-white font-mono">
-                    {stats ? stats.recentTx : '0'} Sand
+                    {stats ? stats.recentTx : '0'} سند
                   </span>
                   <span className="text-xs text-blue-400 bg-blue-900/50 px-2 py-0.5 rounded flex items-center gap-1">
                     <TrendingUp size={12} /> پایش سیستم

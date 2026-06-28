@@ -1,7 +1,8 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { fetchJson } from '../api';
+import { toast } from 'react-hot-toast';
 import { Item, User } from '../types';
-import { Search, Plus, Upload, Download } from 'lucide-react';
+import { Search, Plus, Upload, Download, ChevronRight, ChevronLeft } from 'lucide-react';
 import * as xlsx from 'xlsx';
 import { cn } from '../utils';
 import { useSearch } from '../SearchContext';
@@ -13,6 +14,11 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
   const [showModal, setShowModal] = useState(false);
   const [confirmState, setConfirmState] = useState<{ isOpen: boolean; itemId: number }>({ isOpen: false, itemId: 0 });
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const [loading, setLoading] = useState(false);
 
   const [form, setForm] = useState<any>({ 
     name: '', 
@@ -35,7 +41,7 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
     if (!file) return;
 
     if (file.size > 100 * 1024) {
-      alert('حجم تصویر نباید بیشتر از ۱۰۰ کیلوبایت باشد');
+      toast.error('حجم تصویر نباید بیشتر از ۱۰۰ کیلوبایت باشد');
       e.target.value = '';
       return;
     }
@@ -75,29 +81,47 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
     reader.readAsDataURL(file);
   };
 
-  const loadItems = () => {
-    fetchJson(`/items?type=${type}`)
-      .then(setItems)
-      .catch(console.error);
-  };
+  const loadItems = useCallback(async () => {
+    setLoading(true);
+    try {
+      const query = new URLSearchParams({
+        page: page.toString(),
+        limit: '50',
+        type: type
+      });
+      if (search) query.append('search', search);
+
+      const res = await fetchJson(`/items?${query.toString()}`);
+      if (res && res.data) {
+        setItems(res.data);
+        setTotalPages(res.totalPages);
+        setTotalItems(res.total);
+      } else if (Array.isArray(res)) {
+        setItems(res);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, search, type]);
 
   const executeArchive = () => {
     const id = confirmState.itemId;
     fetchJson(`/items/${id}`, { method: 'DELETE' })
       .then(() => {
-        alert('کالا با موفقیت بایگانی گردید.');
+        toast.success('کالا با موفقیت بایگانی گردید.');
         loadItems();
         setConfirmState({ isOpen: false, itemId: 0 });
       })
       .catch(err => {
-        alert(err.message);
+        toast.error(err.message);
         setConfirmState({ isOpen: false, itemId: 0 });
       });
   };
 
   useEffect(() => {
     loadItems();
-    setSearch('');
     
     // load categories
     fetchJson('/categories')
@@ -116,7 +140,12 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
         setForm((prev: any) => ({ ...prev, ...initialStocks }));
       }).catch(console.error);
 
-  }, [type]);
+  }, [loadItems, type]);
+
+  // Reset to page 1 on filter change
+  useEffect(() => {
+    setPage(1);
+  }, [search]);
 
   const [allCategories, setAllCategories] = useState<{ id: number; name: string; prefix: string; type: string }[]>([]);
   const [productYear, setProductYear] = useState(() => Intl.DateTimeFormat('en-US-u-ca-persian', {year: 'numeric'}).format(new Date()));
@@ -212,30 +241,44 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
       setProductTransfer('');
       setProductYear(Intl.DateTimeFormat('en-US-u-ca-persian', {year: 'numeric'}).format(new Date()));
       loadItems();
+      toast.success('کالا با موفقیت ثبت شد.');
     } catch (err) {
-      alert('خطا در ثبت کالا، لطفا کد کالا را مجددا بررسی نمایید.');
+      toast.error('خطا در ثبت کالا، لطفا کد کالا را مجددا بررسی نمایید.');
     }
   };
 
-  const handleExport = () => {
-    const ws = xlsx.utils.json_to_sheet(items.map(item => {
-      const exportRow: any = {
-        'دسته‌بندی': item.category || '',
-        'کد کالا': item.code,
-        'نام محصول': item.name,
-        'موجودی کل': item.current_stock,
-      };
-      for (const w of warehouses) {
-        exportRow[`موجودی ${w.name}`] = (item as any)[`stock_${w.code}`] || 0;
-      }
-      exportRow['حد نقطه سفارش (آلارم کسری)'] = (item as any).reorder_point || 0;
-      exportRow['قیمت میانگین خرید (ریال)'] = (item as any).weighted_average_cost || 0;
-      exportRow['واحد'] = item.unit;
-      return exportRow;
-    }));
-    const wb = xlsx.utils.book_new();
-    xlsx.utils.book_append_sheet(wb, ws, title);
-    xlsx.writeFile(wb, `${title}.xlsx`);
+  const handleExport = async () => {
+    try {
+      const query = new URLSearchParams({
+        export: 'true',
+        type: type
+      });
+      if (search) query.append('search', search);
+
+      const fullData: Item[] = await fetchJson(`/items?${query.toString()}`);
+
+      const ws = xlsx.utils.json_to_sheet(fullData.map(item => {
+        const exportRow: any = {
+          'دسته‌بندی': item.category || '',
+          'کد کالا': item.code,
+          'نام محصول': item.name,
+          'موجودی کل': item.current_stock,
+        };
+        for (const w of warehouses) {
+          exportRow[`موجودی ${w.name}`] = (item as any)[`stock_${w.code}`] || 0;
+        }
+        exportRow['حد نقطه سفارش (آلارم کسری)'] = (item as any).reorder_point || 0;
+        exportRow['قیمت میانگین خرید (ریال)'] = (item as any).weighted_average_cost || 0;
+        exportRow['واحد'] = item.unit;
+        return exportRow;
+      }));
+      const wb = xlsx.utils.book_new();
+      xlsx.utils.book_append_sheet(wb, ws, title);
+      xlsx.writeFile(wb, `${title}.xlsx`);
+    } catch(err) {
+      console.error(err);
+      toast.error('خطا در دریافت اطلاعات برای خروجی اکسل.');
+    }
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -289,10 +332,10 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
             successCount++;
           }
         }
-        alert(`${successCount} کالا با موفقیت از اکسل وارد شد.`);
+        toast.success(`${successCount} کالا با موفقیت از اکسل وارد شد.`);
         loadItems();
       } catch (err) {
-        alert('خطا در پردازش فایل اکسل. لطفاً ساختار ستون‌ها را بر اساس خروجی سیستم هماهنگ کنید.');
+        toast.error('خطا در پردازش فایل اکسل. لطفاً ساختار ستون‌ها را بر اساس خروجی سیستم هماهنگ کنید.');
       }
     };
     reader.readAsBinaryString(file);
@@ -300,11 +343,6 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
       fileInputRef.current.value = '';
     }
   };
-
-  const filteredItems = items.filter(item => 
-    item.name.toLowerCase().includes(search.toLowerCase()) || 
-    item.code.toLowerCase().includes(search.toLowerCase())
-  );
 
   return (
     <div className="space-y-6">
@@ -325,7 +363,7 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
       )}
 
       <div className="bg-white border rounded-xl shadow-sm flex flex-col min-h-[460px]">
-        <div className="p-4 border-b flex justify-between items-center bg-white">
+        <div className="p-4 border-b flex justify-between items-center bg-white flex-wrap gap-4">
           <h3 className="font-bold flex items-center gap-2">📦 {title}</h3>
           <div className="flex gap-2">
             <button onClick={handleExport} className="px-3 py-1.5 text-xs font-medium border rounded hover:bg-slate-50 transition-colors flex items-center gap-1">
@@ -362,9 +400,14 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto relative min-h-[300px]">
+          {loading && (
+            <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-10 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            </div>
+          )}
           <table className="w-full text-sm text-right">
-            <thead className="bg-slate-50 text-slate-500 border-b sticky top-0 text-xs">
+            <thead className="bg-slate-50 text-slate-500 border-b sticky top-0 text-xs z-0">
               <tr>
                 <th className="p-3 w-16">No.</th>
                 <th className="p-3 font-medium">دسته‌بندی</th>
@@ -379,7 +422,7 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
               </tr>
             </thead>
             <tbody className="divide-y text-xs">
-              {filteredItems.map((item, idx) => {
+              {items.map((item, idx) => {
                 const rPoint = (item as any).reorder_point || 0;
                 const avgCost = (item as any).weighted_average_cost || 0;
                 const isUnderReorder = item.current_stock <= rPoint && rPoint > 0;
@@ -471,7 +514,7 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
                   </tr>
                 );
               })}
-              {filteredItems.length === 0 && (
+              {!loading && items.length === 0 && (
                 <tr>
                   <td colSpan={10} className="p-8 text-center text-slate-500">موردی یافت نشد.</td>
                 </tr>
@@ -481,7 +524,30 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
         </div>
         
         <div className="p-3 bg-slate-50 border-t flex items-center justify-between mt-auto">
-          <span className="text-xs text-slate-500">نمایش {filteredItems.length} مورد</span>
+          <span className="text-xs text-slate-500">
+            نمایش {items.length} مورد {totalItems > 0 ? `از کل ${totalItems} مورد` : ''}
+          </span>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <button 
+                disabled={page === 1}
+                onClick={() => setPage(p => p - 1)}
+                className="p-1 border rounded bg-white hover:bg-slate-100 disabled:opacity-50 text-slate-600"
+              >
+                <ChevronRight size={16} />
+              </button>
+              <span className="text-xs font-medium px-2 text-slate-600">
+                صفحه {page} از {totalPages}
+              </span>
+              <button 
+                disabled={page === totalPages}
+                onClick={() => setPage(p => p + 1)}
+                className="p-1 border rounded bg-white hover:bg-slate-100 disabled:opacity-50 text-slate-600"
+              >
+                <ChevronLeft size={16} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
