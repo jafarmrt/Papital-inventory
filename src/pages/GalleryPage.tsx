@@ -6,8 +6,10 @@ import { cn } from '../utils';
 
 export default function GalleryPage({ user }: { user: User }) {
   const [items, setItems] = useState<Item[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState<'product'|'raw_material'>('product');
+  const [selectedCategory, setSelectedCategory] = useState('');
 
   const loadData = async () => {
     try {
@@ -17,6 +19,11 @@ export default function GalleryPage({ user }: { user: User }) {
       } else if (Array.isArray(res)) {
         setItems(res);
       }
+      
+      try {
+        const cats = await fetchJson('/categories');
+        setCategories(cats || []);
+      } catch(e) {}
     } catch(err) {}
   };
 
@@ -28,9 +35,12 @@ export default function GalleryPage({ user }: { user: User }) {
   const withImages = items.filter(c => c.image || c.thumbnail);
   
   const filtered = withImages.filter(c => 
-    (c.name && c.name.includes(search)) || 
-    (c.code && c.code.includes(search)) || 
-    (c.category && c.category.includes(search))
+    (
+      (c.name && c.name.includes(search)) || 
+      (c.code && c.code.includes(search)) || 
+      (c.category && c.category.includes(search))
+    ) &&
+    (selectedCategory ? c.category === selectedCategory : true)
   );
 
   return (
@@ -55,15 +65,29 @@ export default function GalleryPage({ user }: { user: User }) {
       </div>
 
       <div className="p-3 bg-slate-50 border-b flex justify-between items-center gap-4 shrink-0">
-        <div className="relative w-full max-w-sm">
-          <Search className="absolute right-3 top-2.5 text-slate-400" size={16} />
-          <input 
-            type="text" 
-            placeholder="جستجو نام، کد یا دسته‌بندی..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-3 pr-10 py-1.5 rounded border text-sm"
-          />
+        <div className="flex items-center gap-2 w-full max-w-2xl">
+          <div className="relative w-full max-w-sm">
+            <Search className="absolute right-3 top-2.5 text-slate-400" size={16} />
+            <input 
+              type="text" 
+              placeholder="جستجو نام، کد یا دسته‌بندی..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-3 pr-10 py-1.5 rounded border text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="w-48 py-1.5 px-3 rounded border text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+          >
+            <option value="">همه دسته‌بندی‌ها</option>
+            {categories.filter(c => c.type === tab).length === 0 && <option disabled>دسته بندی یافت نشد</option>}
+            {categories.filter(c => c.type === tab).map(c => (
+              <option key={c.id} value={c.name}>{c.name}</option>
+            ))}
+          </select>
         </div>
       </div>
 

@@ -23,6 +23,7 @@ import InventoryAuditPage from './pages/InventoryAuditPage';
 import CreateInvoicePage from './pages/CreateInvoicePage';
 import CustomersPage from './pages/CustomersPage';
 import PricingPage from './pages/PricingPage';
+import InvoicesListPage from './pages/InvoicesListPage';
 import GalleryPage from './pages/GalleryPage';
 import { User } from './types';
 
@@ -35,8 +36,9 @@ function Sidebar({ user, onLogout }: { user: User, onLogout: () => void }) {
     { name: 'گالری اقلام', path: '/gallery', icon: Image },
     { name: 'قیمت‌گذاری', path: '/pricing', icon: DollarSign },
     { name: 'مشتریان', path: '/customers', icon: UsersRound },
-    { name: 'رسید انبار (ورود)', path: '/receipts', icon: FileInput },
+    { name: 'اسناد انبار', path: '/receipts', icon: FileInput },
     { name: 'صدور فاکتور / حواله', path: '/remittances', icon: FileOutput },
+    { name: 'لیست اسناد و فاکتورها', path: '/invoices', icon: ClipboardList },
     { name: 'انبارگردانی دوره‌ای', path: '/audit', icon: ClipboardList },
   ];
 
@@ -149,8 +151,9 @@ export default function App() {
               <Route path="/gallery" element={<GalleryPage user={user} />} />
               <Route path="/pricing" element={<PricingPage user={user} />} />
               <Route path="/customers" element={<CustomersPage user={user} />} />
-              <Route path="/receipts" element={<DocumentsPage actionType="in" title="رسید ورود به انبار" user={user} />} />
+              <Route path="/receipts" element={<DocumentsPage user={user} />} />
               <Route path="/remittances" element={<CreateInvoicePage user={user} />} />
+              <Route path="/invoices" element={<InvoicesListPage />} />
               <Route path="/audit" element={<InventoryAuditPage user={user} />} />
               {user.role === 'admin' && (
                 <>

@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { fetchJson } from '../api';
 import { User } from '../types';
 import { 
   ClipboardCheck, RefreshCw, Search, CheckCircle, 
-  AlertTriangle, Save, HelpCircle, Warehouse, ArrowLeftRight 
+  AlertTriangle, Save, HelpCircle, Warehouse, ArrowLeftRight, Eye, X,
+  ChevronRight, ChevronLeft
 } from 'lucide-react';
 
 interface AuditItemInput {
@@ -21,6 +22,10 @@ interface AuditItemInput {
 
 export default function InventoryAuditPage({ user }: { user: User }) {
   const [items, setItems] = useState<AuditItemInput[]>([]);
+  const [auditedItemsMap, setAuditedItemsMap] = useState<Record<number, AuditItemInput>>({});
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('all'); // all, product, raw_material
   const [selectedLocation, setSelectedLocation] = useState<string>('safe');
@@ -32,38 +37,44 @@ export default function InventoryAuditPage({ user }: { user: User }) {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const [activeTab, setActiveTab] = useState<'new_audit' | 'reports'>('new_audit');
+  const [pastAudits, setPastAudits] = useState<any[]>([]);
+  const [selectedAudit, setSelectedAudit] = useState<any | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const [modalLoading, setModalLoading] = useState(false);
+
+  const auditedMapRef = useRef<Record<number, AuditItemInput>>({});
+  useEffect(() => {
+    auditedMapRef.current = auditedItemsMap;
+  }, [auditedItemsMap]);
+
+  const handleViewAudit = (docId: number) => {
+    setModalLoading(true);
+    setShowModal(true);
+    fetchJson(`/documents/${docId}`)
+      .then(res => {
+        setSelectedAudit(res);
+      })
+      .catch(err => {
+        console.error(err);
+      })
+      .finally(() => {
+        setModalLoading(false);
+      });
+  };
+
   const loadData = () => {
-    setLoading(true);
     // 1. Fetch next references
     fetchJson(`/documents/next-ref?type=audit`)
       .then(res => {
         setNextRef(res.nextRef || '1');
       })
       .catch(err => console.error(err));
-
-    // 2. Fetch items
-    fetchJson('/items?limit=0')
-      .then((res: any) => {
-        const data = res.data || res;
-        // Map items and compute system stock on selected location
-        const mapped = data.map((i: any) => {
-          const system_stock_computed = i[`stock_${selectedLocation}`] || 0;
-
-          return {
-            ...i,
-            system_stock_computed,
-            physical_stock: '' // starts with blank, meaning untouched
-          };
-        });
-        setItems(mapped);
-        setErrorMsg(null);
-      })
-      .catch(err => {
-        setErrorMsg('خطا در بارگذاری فرآیند انبارداری و کالاها');
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+      
+    // 2. Fetch past audits
+    fetchJson('/documents?type=audit')
+      .then(res => setPastAudits(res))
+      .catch(err => console.error(err));
   };
 
   useEffect(() => {
@@ -79,16 +90,85 @@ export default function InventoryAuditPage({ user }: { user: User }) {
     loadData();
   }, [selectedLocation]); // reload if location changes so system stock calculations match that location
 
+  useEffect(() => {
+    setPage(1);
+  }, [search, filterType]);
+
+  useEffect(() => {
+    setLoading(true);
+    const query = new URLSearchParams({
+      page: page.toString(),
+      limit: '50'
+    });
+    if (filterType !== 'all') {
+      query.append('type', filterType);
+    }
+    if (search) {
+      query.append('search', search);
+    }
+
+    fetchJson(`/items?${query.toString()}`)
+      .then((res: any) => {
+        if (res && res.data) {
+          const mapped = res.data.map((i: any) => {
+            const system_stock_computed = i[`stock_${selectedLocation}`] || 0;
+            const audited = auditedMapRef.current[i.id];
+            return {
+              ...i,
+              system_stock_computed,
+              physical_stock: audited ? audited.physical_stock : ''
+            };
+          });
+          setItems(mapped);
+          setTotalPages(res.totalPages || 1);
+          setTotalItems(res.total || 0);
+        } else if (Array.isArray(res)) {
+          const mapped = res.map((i: any) => {
+            const system_stock_computed = i[`stock_${selectedLocation}`] || 0;
+            const audited = auditedMapRef.current[i.id];
+            return {
+              ...i,
+              system_stock_computed,
+              physical_stock: audited ? audited.physical_stock : ''
+            };
+          });
+          setItems(mapped);
+          setTotalPages(1);
+          setTotalItems(res.length);
+        }
+        setErrorMsg(null);
+      })
+      .catch(err => {
+        console.error(err);
+        setErrorMsg('خطا در بارگذاری فرآیند انبارداری و کالاها');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [page, search, filterType, selectedLocation]);
+
   // Handle single physical input change
   const handlePhysicalChange = (itemId: number, value: string) => {
+    const sanitized = value.replace(/[^0-9.]/g, '');
     setItems(prev => prev.map(item => {
       if (item.id === itemId) {
-        // protect numerals
-        const sanitized = value.replace(/[^0-9.]/g, '');
-        return {
+        const updatedItem = {
           ...item,
           physical_stock: sanitized
         };
+        if (sanitized !== '') {
+          setAuditedItemsMap(prevMap => ({
+            ...prevMap,
+            [itemId]: updatedItem
+          }));
+        } else {
+          setAuditedItemsMap(prevMap => {
+            const copy = { ...prevMap };
+            delete copy[itemId];
+            return copy;
+          });
+        }
+        return updatedItem;
       }
       return item;
     }));
@@ -96,26 +176,30 @@ export default function InventoryAuditPage({ user }: { user: User }) {
 
   // Quick helper: Autofill physical stock with current system stock for items to save operator time
   const handleAutofillAll = () => {
-    setItems(prev => prev.map(item => ({
-      ...item,
-      physical_stock: item.system_stock_computed.toString()
-    })));
+    setAuditedItemsMap(prevMap => {
+      const copy = { ...prevMap };
+      const updatedItems = items.map(item => {
+        const valStr = item.system_stock_computed.toString();
+        const updatedItem = {
+          ...item,
+          physical_stock: valStr
+        };
+        copy[item.id] = updatedItem;
+        return updatedItem;
+      });
+      setItems(updatedItems);
+      return copy;
+    });
   };
 
   // Reset physical counters
   const handleClearAll = () => {
+    setAuditedItemsMap({});
     setItems(prev => prev.map(item => ({
       ...item,
       physical_stock: ''
     })));
   };
-
-  const filteredItems = items.filter(item => {
-    const matchesSearch = item.name.toLowerCase().includes(search.toLowerCase()) || 
-                          item.code.toLowerCase().includes(search.toLowerCase());
-    const matchesType = filterType === 'all' || item.type === filterType;
-    return matchesSearch && matchesType;
-  });
 
   const handleSubmitAudit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,8 +210,8 @@ export default function InventoryAuditPage({ user }: { user: User }) {
     }
 
     // Filter down to only items that have been physically counted (operator put a value)
-    const auditedItems = items.filter(item => item.physical_stock !== '');
-    if (auditedItems.length === 0) {
+    const auditedList = (Object.values(auditedItemsMap) as AuditItemInput[]).filter(item => item.physical_stock !== '');
+    if (auditedList.length === 0) {
       setErrorMsg('کالایی شمارش نشده است. لطفاً حداقل موجودی واقعی یک کالا را وارد نمائید.');
       return;
     }
@@ -142,7 +226,7 @@ export default function InventoryAuditPage({ user }: { user: User }) {
       user: user.full_name,
       location: selectedLocation,
       notes: notes || `انبارگردانی دوره‌ای انبار (${selectedLocation === 'safe' ? 'گاوصندوق اصلی' : selectedLocation === 'workshop' ? 'کارگاه ساخت' : 'ویترین نمایشگاه'})`,
-      items: auditedItems.map(item => ({
+      items: auditedList.map(item => ({
         itemId: item.id,
         system_stock: item.system_stock_computed,
         physical_stock: parseInt(item.physical_stock, 10),
@@ -157,7 +241,9 @@ export default function InventoryAuditPage({ user }: { user: User }) {
       .then(res => {
         setSuccessMsg(`انبارگردانی دوره‌ای شماره سند ${nextRef} با موفقیت ثبت شد و موجودی فیزیکی سیستم تعدیل گردید.`);
         setNotes('');
+        setAuditedItemsMap({});
         loadData(); // reload
+        setPage(1);
         window.scrollTo({ top: 0, behavior: 'smooth' });
       })
       .catch(err => {
@@ -190,6 +276,21 @@ export default function InventoryAuditPage({ user }: { user: User }) {
         </div>
       </div>
 
+      <div className="flex gap-4 border-b">
+        <button
+          onClick={() => setActiveTab('new_audit')}
+          className={`pb-2 px-1 text-sm font-medium border-b-2 transition-colors ${activeTab === 'new_audit' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+        >
+          ثبت انبارگردانی جدید
+        </button>
+        <button
+          onClick={() => setActiveTab('reports')}
+          className={`pb-2 px-1 text-sm font-medium border-b-2 transition-colors ${activeTab === 'reports' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+        >
+          گزارشات انبارگردانی
+        </button>
+      </div>
+
       {successMsg && (
         <div className="flex items-center gap-3 p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm rounded-xl">
           <CheckCircle size={18} className="text-emerald-600" />
@@ -204,8 +305,10 @@ export default function InventoryAuditPage({ user }: { user: User }) {
         </div>
       )}
 
-      {/* Audit Location Selector & Settings */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {activeTab === 'new_audit' && (
+        <>
+          {/* Audit Location Selector & Settings */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         
         {/* Col 1 & 2: Warehouse and Location setup */}
         <div className="md:col-span-2 bg-white p-6 border rounded-xl shadow-sm space-y-4">
@@ -350,14 +453,14 @@ export default function InventoryAuditPage({ user }: { user: User }) {
                     در حال بازیابی اطلاعات انبارها و موجودی‌ها...
                   </td>
                 </tr>
-              ) : filteredItems.length === 0 ? (
+              ) : items.length === 0 ? (
                 <tr>
                   <td colSpan={warehouses.length + 6} className="p-10 text-center text-slate-400">
                     کالایی با فیلتر انتخابی شما در انبار یافت نشد.
                   </td>
                 </tr>
               ) : (
-                filteredItems.map(item => {
+                items.map(item => {
                   const physical_val = item.physical_stock === '' ? null : parseInt(item.physical_stock, 10);
                   const isCounted = physical_val !== null;
                   const variance = isCounted ? (physical_val - item.system_stock_computed) : 0;
@@ -420,7 +523,198 @@ export default function InventoryAuditPage({ user }: { user: User }) {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Bar */}
+        {totalPages > 1 && (
+          <div className="p-3 bg-slate-50 border-t flex items-center justify-between">
+            <span className="text-xs text-slate-500 font-semibold">
+              نمایش {items.length} کالا از کل {totalItems} کالا
+            </span>
+            <div className="flex items-center gap-1">
+              <button 
+                type="button"
+                disabled={page === 1}
+                onClick={() => setPage(p => p - 1)}
+                className="p-1 border rounded bg-white hover:bg-slate-100 disabled:opacity-50 text-slate-600"
+              >
+                <ChevronRight size={16} />
+              </button>
+              <span className="text-xs font-medium px-2 text-slate-600">
+                صفحه {page} از {totalPages}
+              </span>
+              <button 
+                type="button"
+                disabled={page === totalPages}
+                onClick={() => setPage(p => p + 1)}
+                className="p-1 border rounded bg-white hover:bg-slate-100 disabled:opacity-50 text-slate-600"
+              >
+                <ChevronLeft size={16} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+      </>
+      )}
+
+      {activeTab === 'reports' && (
+        <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 border-b">
+                <tr>
+                  <th className="p-4 text-right font-medium text-slate-600">شماره سند</th>
+                  <th className="p-4 text-right font-medium text-slate-600">تاریخ</th>
+                  <th className="p-4 text-right font-medium text-slate-600">ثبت کننده</th>
+                  <th className="p-4 text-right font-medium text-slate-600">یادداشت</th>
+                  <th className="p-4 text-center font-medium text-slate-600">عملیات</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {pastAudits.length === 0 ? (
+                  <tr><td colSpan={5} className="p-8 text-center text-slate-500">هیچ گزارش انبارگردانی یافت نشد.</td></tr>
+                ) : (
+                  pastAudits.map(doc => (
+                    <tr key={doc.id} className="hover:bg-slate-50 transition-colors">
+                      <td className="p-4 font-mono font-medium text-slate-700">{doc.ref_number}</td>
+                      <td className="p-4 font-mono text-slate-600">{doc.date}</td>
+                      <td className="p-4 text-slate-600">{doc.user}</td>
+                      <td className="p-4 text-slate-600">{doc.notes || '-'}</td>
+                      <td className="p-4 text-center">
+                        <button
+                          onClick={() => handleViewAudit(doc.id)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 text-xs font-medium transition-colors"
+                        >
+                          <Eye size={14} />
+                          مشاهده جزئیات
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Detail Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-fade-in" style={{ direction: 'rtl' }}>
+          <div className="w-full max-w-4xl bg-white rounded-2xl shadow-xl flex flex-col max-h-[85vh] overflow-hidden border">
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b bg-slate-50">
+              <div className="flex items-center gap-3">
+                <ClipboardCheck className="text-blue-600" size={22} />
+                <h3 className="font-bold text-slate-800 text-lg">
+                  جزئیات سند انبارگردانی {selectedAudit ? `شماره ${selectedAudit.ref_number}` : ''}
+                </h3>
+              </div>
+              <button 
+                onClick={() => { setShowModal(false); setSelectedAudit(null); }}
+                className="p-1.5 hover:bg-slate-200 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {modalLoading ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-3 text-slate-500">
+                  <RefreshCw className="animate-spin text-blue-600" size={32} />
+                  <span>در حال دریافت اطلاعات...</span>
+                </div>
+              ) : selectedAudit ? (
+                <>
+                  {/* Meta Details Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100 text-sm">
+                    <div>
+                      <span className="text-slate-500 block mb-1">شماره سند:</span>
+                      <strong className="text-slate-800 font-mono text-base">{selectedAudit.ref_number}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block mb-1">تاریخ ثبت:</span>
+                      <strong className="text-slate-800 font-mono">{selectedAudit.date}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block mb-1">ثبت کننده:</span>
+                      <strong className="text-slate-800">{selectedAudit.user || '-'}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block mb-1">یادداشت:</span>
+                      <strong className="text-slate-800">{selectedAudit.notes || '-'}</strong>
+                    </div>
+                  </div>
+
+                  {/* Audit Items Table */}
+                  <div className="border rounded-xl overflow-hidden shadow-sm">
+                    <table className="w-full text-sm">
+                      <thead className="bg-slate-50 border-b">
+                        <tr>
+                          <th className="p-3 text-right font-medium text-slate-600">ردیف</th>
+                          <th className="p-3 text-right font-medium text-slate-600">کد کالا</th>
+                          <th className="p-3 text-right font-medium text-slate-600">نام کالا</th>
+                          <th className="p-3 text-center font-medium text-slate-600">موجودی سیستم</th>
+                          <th className="p-3 text-center font-medium text-slate-600">موجودی فیزیکی</th>
+                          <th className="p-3 text-center font-medium text-slate-600">مغایرت</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {selectedAudit.items?.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="p-6 text-center text-slate-400">کالایی در این سند ثبت نشده است.</td>
+                          </tr>
+                        ) : (
+                          selectedAudit.items?.map((line: any, idx: number) => {
+                            const variance = Number(line.variance || 0);
+                            return (
+                              <tr key={idx} className="hover:bg-slate-50/50">
+                                <td className="p-3 text-slate-500 text-right">{idx + 1}</td>
+                                <td className="p-3 text-slate-600 font-mono text-right">{line.code}</td>
+                                <td className="p-3 text-slate-800 font-medium text-right">{line.name}</td>
+                                <td className="p-3 text-center text-slate-600 font-mono">{line.system_stock} {line.unit}</td>
+                                <td className="p-3 text-center text-slate-800 font-mono font-medium">{line.quantity} {line.unit}</td>
+                                <td className="p-3 text-center">
+                                  {variance === 0 ? (
+                                    <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded-full">
+                                      ✓ منطبق
+                                    </span>
+                                  ) : variance > 0 ? (
+                                    <span className="text-xs bg-amber-100 text-amber-800 font-bold px-2.5 py-1 rounded-full font-mono">
+                                      +{variance} اضافی
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs bg-rose-100 text-rose-800 font-bold px-2.5 py-1 rounded-full font-mono">
+                                      {variance} کسری
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center text-slate-400 py-6">خطا در نمایش اطلاعات سند</div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t bg-slate-50 flex justify-end">
+              <button
+                onClick={() => { setShowModal(false); setSelectedAudit(null); }}
+                className="px-4 py-2 bg-slate-200 text-slate-700 hover:bg-slate-300 rounded-xl font-medium text-sm transition-colors"
+              >
+                بستن
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

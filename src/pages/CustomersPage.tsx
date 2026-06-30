@@ -141,7 +141,7 @@ export default function CustomersPage({ user }: { user: User }) {
         {user.role !== 'viewer' && (
           <button onClick={() => {
             setEditingId(null);
-            setForm({ name: '', phone: '', city: '', address: '', notes: '' });
+            resetForm();
             setShowModal(true);
           }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-bold shadow-sm">
             <Plus size={16} /> ثبت شخص جدید

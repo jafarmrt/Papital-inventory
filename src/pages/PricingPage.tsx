@@ -7,8 +7,11 @@ import { cn } from '../utils';
 
 export default function PricingPage({ user }: { user: User }) {
   const [items, setItems] = useState<Item[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
   const [prices, setPrices] = useState<Record<number, ItemPrice[]>>({});
   const [search, setSearch] = useState('');
+  const [tab, setTab] = useState<'product'|'raw_material'>('product');
+  const [selectedCategory, setSelectedCategory] = useState('');
   
   // Bulk update mode
   const [bulkMode, setBulkMode] = useState(false);
@@ -22,9 +25,14 @@ export default function PricingPage({ user }: { user: User }) {
 
   const loadData = async () => {
     try {
-      const allItemsResponse = await fetchJson('/items?type=product&limit=0');
+      const allItemsResponse = await fetchJson(`/items?type=${tab}&limit=0`);
       const allItems = allItemsResponse.data || allItemsResponse;
       setItems(allItems);
+      
+      try {
+        const cats = await fetchJson('/categories');
+        setCategories(cats || []);
+      } catch(e) {}
       
       try {
         const allPrices = await fetchJson('/items/prices/all');
@@ -43,7 +51,7 @@ export default function PricingPage({ user }: { user: User }) {
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [tab]);
 
   const handlePriceChange = (itemId: number, title: string, val: string) => {
     setLocalEdits(prev => ({
@@ -98,7 +106,10 @@ export default function PricingPage({ user }: { user: User }) {
     } catch(err: any) { toast.error(err.message); }
   };
 
-  const filtered = items.filter(c => c.name.includes(search) || c.code.includes(search) || (c.category && c.category.includes(search)));
+  const filtered = items.filter(c => 
+    (c.name.includes(search) || c.code.includes(search) || (c.category && c.category.includes(search))) &&
+    (selectedCategory ? c.category === selectedCategory : true)
+  );
 
   const handleBulkUpdate = async () => {
     if (!bulkPercent || isNaN(Number(bulkPercent))) return;
@@ -122,14 +133,31 @@ export default function PricingPage({ user }: { user: User }) {
     <div className="flex flex-col h-full bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
       <div className="p-6 border-b flex justify-between items-center bg-slate-50 shrink-0">
         <div>
-          <h2 className="text-lg font-bold">مدیریت قیمت‌گذاری محصولات</h2>
+          <h2 className="text-lg font-bold">مدیریت قیمت‌گذاری</h2>
           <p className="text-xs text-slate-500 mt-1">عناوین در بخش تنظیمات قابل تغییر هستند.</p>
         </div>
-        {user.role === 'admin' && (
-          <button onClick={() => setBulkMode(!bulkMode)} className="text-sm bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-bold px-4 py-2 rounded-lg transition-colors">
-            تغییر گروهی قیمت‌ها
-          </button>
-        )}
+        
+        <div className="flex gap-4 items-center">
+          <div className="flex bg-slate-200 rounded-lg p-1">
+            <button 
+              onClick={() => setTab('product')} 
+              className={cn("px-4 py-1.5 rounded-md text-sm font-bold transition-all", tab === 'product' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+            >
+              محصولات نهایی
+            </button>
+            <button 
+              onClick={() => setTab('raw_material')} 
+              className={cn("px-4 py-1.5 rounded-md text-sm font-bold transition-all", tab === 'raw_material' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+            >
+              مواد اولیه
+            </button>
+          </div>
+          {user.role === 'admin' && (
+            <button onClick={() => setBulkMode(!bulkMode)} className="text-sm bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-bold px-4 py-2 rounded-lg transition-colors">
+              تغییر گروهی قیمت‌ها
+            </button>
+          )}
+        </div>
       </div>
 
       {bulkMode && (
@@ -144,15 +172,29 @@ export default function PricingPage({ user }: { user: User }) {
       )}
 
       <div className="p-3 bg-slate-50 border-b flex justify-between items-center gap-4 shrink-0">
-        <div className="relative w-full max-w-sm">
-          <Search className="absolute right-3 top-2.5 text-slate-400" size={16} />
-          <input 
-            type="text" 
-            placeholder="جستجو محصول یا کد..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-3 pr-10 py-1.5 rounded border text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
+        <div className="flex items-center gap-2 w-full max-w-2xl">
+          <div className="relative w-full max-w-sm">
+            <Search className="absolute right-3 top-2.5 text-slate-400" size={16} />
+            <input 
+              type="text" 
+              placeholder="جستجو محصول یا کد..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-3 pr-10 py-1.5 rounded border text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+          
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="w-48 py-1.5 px-3 rounded border text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+          >
+            <option value="">همه دسته‌بندی‌ها</option>
+            {categories.filter(c => c.type === tab).length === 0 && <option disabled>دسته بندی یافت نشد</option>}
+            {categories.filter(c => c.type === tab).map(c => (
+              <option key={c.id} value={c.name}>{c.name}</option>
+            ))}
+          </select>
         </div>
       </div>
 

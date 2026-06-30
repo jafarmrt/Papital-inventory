@@ -1,28 +1,42 @@
-import { sql, eq, and, desc } from 'drizzle-orm';
+import { sql, eq, and, desc, inArray } from 'drizzle-orm';
 import { orm } from '../db/drizzle.js';
 import { documents, documentItems, items, transactions, warehouses, appSettings } from '../db/schema.js';
 
 export class DocumentService {
   /**
+   * Updates the notes of a specific document.
+   */
+  static async updateDocumentNotes(id: number, notes: string): Promise<void> {
+    await orm.update(documents).set({ notes }).where(eq(documents.id, id));
+  }
+
+  /**
    * Calculates the next reference number for a given document type.
    */
   static async getNextRef(type: string): Promise<string> {
-    let startNumber = 1;
+    return await orm.transaction(async (tx) => {
+      let startNumber = 1;
 
-    if (type === 'out') {
-      const startSetting = await orm.select().from(appSettings).where(eq(appSettings.key, 'invoice_start_number'));
-      if (startSetting.length > 0 && !isNaN(parseInt(startSetting[0].value, 10))) {
-        startNumber = parseInt(startSetting[0].value, 10);
+      if (type === 'invoice') {
+        const startSetting = await tx.select().from(appSettings).where(eq(appSettings.key, 'invoice_start_number'));
+        if (startSetting.length > 0 && !isNaN(parseInt(startSetting[0].value, 10))) {
+          startNumber = parseInt(startSetting[0].value, 10);
+        }
       }
-    }
 
-    const docResult = await orm.execute(sql`
-      SELECT MAX(CAST(ref_number AS INTEGER)) as max_num FROM ${documents} WHERE type = ${type} AND is_deleted = 0
-    `);
-    const maxNum = docResult.rows[0]?.max_num ? parseInt(String(docResult.rows[0].max_num), 10) : 0;
-    
-    const nextNum = maxNum && maxNum >= startNumber ? maxNum + 1 : startNumber;
-    return nextNum.toString();
+      const docResult = await tx.execute(sql`
+        SELECT ref_number 
+        FROM ${documents} 
+        WHERE type = ${type} AND is_deleted = 0 
+        ORDER BY CAST(ref_number AS INTEGER) DESC 
+        LIMIT 1 
+        FOR UPDATE
+      `);
+      const maxNum = docResult.rows[0]?.ref_number ? parseInt(String(docResult.rows[0].ref_number), 10) : 0;
+      
+      const nextNum = maxNum && maxNum >= startNumber ? maxNum + 1 : startNumber;
+      return nextNum.toString();
+    });
   }
 
   /**
@@ -83,22 +97,24 @@ export class DocumentService {
               date,
               documentType: 'audit',
               documentRef: String(refNumber),
-              user,
+              createdBy: user,
               notes: txNotes,
               location: targetLoc,
               isDeleted: 0
             });
 
-            // Update jsonb stock array
-            await tx.execute(sql`
-              UPDATE ${items}
-              SET stocks = jsonb_set(COALESCE(stocks, '{}'::jsonb), array[${targetLoc}], to_jsonb(${physical_stock}::numeric)),
-                  current_stock = (
-                    SELECT COALESCE(SUM(value::numeric), 0)
-                    FROM jsonb_each_text(jsonb_set(COALESCE(stocks, '{}'::jsonb), array[${targetLoc}], to_jsonb(${physical_stock}::numeric)))
-                  )
-              WHERE id = ${itemId}
-            `);
+            const [itemData] = await tx.select({ stocks: items.stocks, currentStock: items.currentStock }).from(items).where(eq(items.id, itemId));
+            const currentStocks = (itemData?.stocks as Record<string, number>) || {};
+            const oldLocStock = Number(currentStocks[targetLoc] || 0);
+            currentStocks[targetLoc] = Number(physical_stock);
+            
+            const diff = Number(physical_stock) - oldLocStock;
+            const newTotalStock = Number(itemData?.currentStock || 0) + diff;
+
+            await tx.update(items).set({
+              stocks: currentStocks,
+              currentStock: newTotalStock
+            }).where(eq(items.id, itemId));
           }
         }
       } else {
@@ -111,11 +127,14 @@ export class DocumentService {
 
           if (docStatus === 'final') {
             if (inOut === 'out') {
-              const stockCheck = await tx.execute(sql`SELECT (COALESCE((stocks->>${targetLoc})::numeric, 0)) as loc_stock, name, unit FROM ${items} WHERE id = ${itemId}`);
-              const locStock = Number(stockCheck.rows[0]?.loc_stock || 0);
+              const [stockCheck] = await tx.select({ stocks: items.stocks, name: items.name, unit: items.unit }).from(items).where(eq(items.id, itemId)).for('update');
+              const stocksMap = stockCheck?.stocks as Record<string, number> || {};
+              const locStock = Number(stocksMap[targetLoc] || 0);
               if (locStock < qty) {
-                throw new Error(`عدم موجودی کافی در انبار انتخابی! موجودی کالای ${stockCheck.rows[0]?.name}: ${locStock} ${stockCheck.rows[0]?.unit}`);
+                throw new Error(`عدم موجودی کافی در انبار انتخابی! موجودی کالای ${stockCheck?.name}: ${locStock} ${stockCheck?.unit}`);
               }
+            } else {
+              await tx.select({ id: items.id }).from(items).where(eq(items.id, itemId)).for('update');
             }
 
             await tx.insert(transactions).values({
@@ -126,30 +145,35 @@ export class DocumentService {
               date,
               documentType: docType,
               documentRef: String(refNumber),
-              user,
+              createdBy: user,
+              notes: '',
               location: targetLoc,
               isDeleted: 0
             });
 
+            const [itemData] = await tx.select({ stocks: items.stocks, currentStock: items.currentStock, weightedAverageCost: items.weightedAverageCost }).from(items).where(eq(items.id, itemId));
+            const currentStocks = (itemData?.stocks as Record<string, number>) || {};
+            const currentLocStock = Number(currentStocks[targetLoc] || 0);
+            
+            currentStocks[targetLoc] = inOut === 'in' ? currentLocStock + qty : currentLocStock - qty;
+            
+            const oldTotalStock = Number(itemData?.currentStock || 0);
+            const newTotalStock = inOut === 'in' ? oldTotalStock + qty : oldTotalStock - qty;
+            
+            let newWAC = Number(itemData?.weightedAverageCost || 0);
             if (inOut === 'in') {
-              await tx.execute(sql`
-                UPDATE ${items}
-                SET stocks = jsonb_set(COALESCE(stocks, '{}'::jsonb), array[${targetLoc}], to_jsonb((COALESCE((stocks->>${targetLoc})::numeric, 0) + ${qty})::numeric)),
-                    weighted_average_cost = CASE 
-                      WHEN current_stock <= 0 THEN ${price}
-                      ELSE ((current_stock * weighted_average_cost) + (${qty} * ${price})) / (current_stock + ${qty})
-                    END,
-                    current_stock = current_stock + ${qty}
-                WHERE id = ${itemId}
-              `);
-            } else {
-              await tx.execute(sql`
-                UPDATE ${items}
-                SET stocks = jsonb_set(COALESCE(stocks, '{}'::jsonb), array[${targetLoc}], to_jsonb((COALESCE((stocks->>${targetLoc})::numeric, 0) - ${qty})::numeric)),
-                    current_stock = current_stock - ${qty}
-                WHERE id = ${itemId}
-              `);
+              if (oldTotalStock <= 0 || newTotalStock <= 0) {
+                newWAC = price;
+              } else {
+                newWAC = ((oldTotalStock * newWAC) + (qty * price)) / newTotalStock;
+              }
             }
+
+            await tx.update(items).set({
+              stocks: currentStocks,
+              currentStock: newTotalStock,
+              weightedAverageCost: newWAC
+            }).where(eq(items.id, itemId));
           }
 
           await tx.insert(documentItems).values({
@@ -179,14 +203,30 @@ export class DocumentService {
       docs = await orm.select().from(documents).where(eq(documents.isDeleted, 0)).orderBy(desc(documents.id));
     }
 
-    return docs.map(d => ({
-      ...d,
-      buyer_name: d.buyerName,
-      buyer_city: d.buyerCity,
-      buyer_phone: d.buyerPhone,
-      buyer_address: d.buyerAddress,
-      ref_number: d.refNumber
-    }));
+    // Fetch items for all these docs to calculate totals
+    const docIds = docs.map(d => d.id);
+    let allItems: any[] = [];
+    if (docIds.length > 0) {
+      allItems = await orm.select({
+        document_id: documentItems.documentId,
+        quantity: documentItems.quantity,
+        unit_price: documentItems.unitPrice,
+        discount: documentItems.discount
+      }).from(documentItems).where(inArray(documentItems.documentId, docIds));
+    }
+
+    return docs.map(d => {
+      const dItems = allItems.filter(i => i.document_id === d.id);
+      return {
+        ...d,
+        buyer_name: d.buyerName,
+        buyer_city: d.buyerCity,
+        buyer_phone: d.buyerPhone,
+        buyer_address: d.buyerAddress,
+        ref_number: d.refNumber,
+        items: dItems
+      };
+    });
   }
 
   /**
@@ -203,6 +243,10 @@ export class DocumentService {
       WHERE di.document_id = ${doc.id}
     `);
 
+    const txs = doc.type === 'audit'
+      ? await orm.select().from(transactions).where(eq(transactions.documentId, doc.id))
+      : [];
+
     return {
       ...doc,
       buyer_name: doc.buyerName,
@@ -210,12 +254,20 @@ export class DocumentService {
       buyer_phone: doc.buyerPhone,
       buyer_address: doc.buyerAddress,
       ref_number: doc.refNumber,
-      items: itemsResult.rows.map(row => ({
-        ...row,
-        item_id: row.item_id,
-        unit_price: row.unit_price,
-        document_id: row.document_id
-      }))
+      items: itemsResult.rows.map(row => {
+        const matchingTx = txs.find(t => t.itemId === row.item_id);
+        const variance = matchingTx 
+          ? (matchingTx.type === 'in' ? matchingTx.quantity : -matchingTx.quantity)
+          : 0;
+        return {
+          ...row,
+          item_id: row.item_id,
+          unit_price: row.unit_price,
+          document_id: row.document_id,
+          variance,
+          system_stock: Number(row.quantity) - variance
+        };
+      })
     };
   }
 
@@ -230,16 +282,22 @@ export class DocumentService {
       await tx.update(documents).set({ status: 'final' }).where(eq(documents.id, id));
 
       const docLines = await tx.select().from(documentItems).where(eq(documentItems.documentId, id));
-      const inOut = 'out';
+      const inOut = (doc.type === 'receipt' || doc.type === 'return') ? 'in' : 'out';
 
       for (const item of docLines) {
         const targetLoc = item.location || 'safe';
         const qty = item.quantity;
+        const price = item.unitPrice || 0;
 
-        const stockCheck = await tx.execute(sql`SELECT (COALESCE((stocks->>${targetLoc})::numeric, 0)) as loc_stock, name, unit FROM ${items} WHERE id = ${item.itemId}`);
-        const locStock = Number(stockCheck.rows[0]?.loc_stock || 0);
-        if (locStock < qty) {
-          throw new Error(`عدم موجودی کافی در انبار انتخابی! موجودی کالای ${stockCheck.rows[0]?.name}: ${locStock} ${stockCheck.rows[0]?.unit}`);
+        if (inOut === 'out') {
+          const [stockCheck] = await tx.select({ stocks: items.stocks, name: items.name, unit: items.unit }).from(items).where(eq(items.id, item.itemId)).for('update');
+          const stocksMap = stockCheck?.stocks as Record<string, number> || {};
+          const locStock = Number(stocksMap[targetLoc] || 0);
+          if (locStock < qty) {
+            throw new Error(`عدم موجودی کافی در انبار انتخابی! موجودی کالای ${stockCheck?.name}: ${locStock} ${stockCheck?.unit}`);
+          }
+        } else {
+          await tx.select({ id: items.id }).from(items).where(eq(items.id, item.itemId)).for('update');
         }
 
         await tx.insert(transactions).values({
@@ -250,17 +308,35 @@ export class DocumentService {
           date: doc.date,
           documentType: doc.type,
           documentRef: doc.refNumber,
-          user: user || doc.user,
+          createdBy: user || doc.user,
+          notes: '',
           location: targetLoc,
           isDeleted: 0
         });
+
+        const [itemData] = await tx.select({ stocks: items.stocks, currentStock: items.currentStock, weightedAverageCost: items.weightedAverageCost }).from(items).where(eq(items.id, item.itemId));
+        const currentStocks = (itemData.stocks as Record<string, number>) || {};
+        const currentLocStock = Number(currentStocks[targetLoc] || 0);
         
-        await tx.execute(sql`
-          UPDATE ${items}
-          SET stocks = jsonb_set(COALESCE(stocks, '{}'::jsonb), array[${targetLoc}], to_jsonb((COALESCE((stocks->>${targetLoc})::numeric, 0) - ${qty})::numeric)),
-              current_stock = current_stock - ${qty}
-          WHERE id = ${item.itemId}
-        `);
+        currentStocks[targetLoc] = inOut === 'in' ? currentLocStock + qty : currentLocStock - qty;
+        
+        const oldTotalStock = Number(itemData.currentStock || 0);
+        const newTotalStock = inOut === 'in' ? oldTotalStock + qty : oldTotalStock - qty;
+        
+        let newWAC = Number(itemData.weightedAverageCost || 0);
+        if (inOut === 'in') {
+          if (oldTotalStock <= 0 || newTotalStock <= 0) {
+            newWAC = price;
+          } else {
+            newWAC = ((oldTotalStock * newWAC) + (qty * price)) / newTotalStock;
+          }
+        }
+
+        await tx.update(items).set({
+          stocks: currentStocks,
+          currentStock: newTotalStock,
+          weightedAverageCost: newWAC
+        }).where(eq(items.id, item.itemId));
       }
     });
   }
@@ -274,7 +350,7 @@ export class DocumentService {
       if (!doc) return;
 
       await tx.update(documents).set({ isDeleted: 1 }).where(eq(documents.id, id));
-      await tx.execute(sql`UPDATE ${transactions} SET is_deleted = 1 WHERE document_id = ${doc.id} OR (document_ref = ${doc.refNumber} AND document_type = ${doc.type})`);
+      await tx.update(transactions).set({ isDeleted: 1 }).where(eq(transactions.documentId, doc.id));
 
       const docLines = await tx.select().from(documentItems).where(eq(documentItems.documentId, id));
       const inOut = (doc.type === 'receipt' || doc.type === 'return') ? 'in' : 'out';
@@ -284,21 +360,29 @@ export class DocumentService {
           const qty = item.quantity;
           const targetLoc = item.location || 'safe';
 
+          const [itemData] = await tx.select({ stocks: items.stocks, currentStock: items.currentStock, weightedAverageCost: items.weightedAverageCost }).from(items).where(eq(items.id, item.itemId)).for('update');
+          const currentStocks = (itemData.stocks as Record<string, number>) || {};
+          const currentLocStock = Number(currentStocks[targetLoc] || 0);
+          
+          currentStocks[targetLoc] = inOut === 'in' ? currentLocStock - qty : currentLocStock + qty;
+          
+          const oldTotalStock = Number(itemData.currentStock || 0);
+          const newTotalStock = inOut === 'in' ? oldTotalStock - qty : oldTotalStock + qty;
+          
+          let newWAC = Number(itemData.weightedAverageCost || 0);
           if (inOut === 'in') {
-            await tx.execute(sql`
-              UPDATE ${items}
-              SET stocks = jsonb_set(COALESCE(stocks, '{}'::jsonb), array[${targetLoc}], to_jsonb((COALESCE((stocks->>${targetLoc})::numeric, 0) - ${qty})::numeric)),
-                  current_stock = current_stock - ${qty}
-              WHERE id = ${item.itemId}
-            `);
-          } else {
-            await tx.execute(sql`
-              UPDATE ${items}
-              SET stocks = jsonb_set(COALESCE(stocks, '{}'::jsonb), array[${targetLoc}], to_jsonb((COALESCE((stocks->>${targetLoc})::numeric, 0) + ${qty})::numeric)),
-                  current_stock = current_stock + ${qty}
-              WHERE id = ${item.itemId}
-            `);
+            if (newTotalStock <= 0) {
+              newWAC = newWAC; // keep old
+            } else {
+              newWAC = ((oldTotalStock * newWAC) - (qty * Number(item.unitPrice || 0))) / newTotalStock;
+            }
           }
+
+          await tx.update(items).set({
+            stocks: currentStocks,
+            currentStock: newTotalStock,
+            weightedAverageCost: newWAC
+          }).where(eq(items.id, item.itemId));
         }
       }
     });

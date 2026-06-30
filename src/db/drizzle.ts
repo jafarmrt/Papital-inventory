@@ -10,4 +10,8 @@ export const pool = new Pool({
   connectionString,
 });
 
+pool.on('error', (err) => {
+  console.error('Unexpected error on idle SQL pool client:', err);
+});
+
 export const orm = drizzle(pool, { schema });

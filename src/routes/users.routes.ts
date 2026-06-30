@@ -4,11 +4,13 @@ import { eq, desc } from 'drizzle-orm';
 import { orm } from '../db/drizzle.js';
 import { users } from '../db/schema.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { authorize } from '../middleware/authorize.js';
 import { z } from 'zod';
 import { validate } from '../middleware/validate.js';
 
 const router = Router();
 router.use(authenticateToken); // Protect all user routes
+router.use(authorize('admin')); // Only admins can manage users
 
 const userCreateSchema = z.object({
   body: z.object({

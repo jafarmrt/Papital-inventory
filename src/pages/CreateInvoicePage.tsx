@@ -6,8 +6,9 @@ import { Plus, Trash2, Printer } from 'lucide-react';
 import DatePicker from "react-multi-date-picker";
 import persian from "react-date-object/calendars/persian";
 import persian_fa from "react-date-object/locales/persian_fa";
-import { cn } from '../utils';
+import { cn, formatPersianPrice, formatPersianNumber } from '../utils';
 import ConfirmModal from '../components/ConfirmModal';
+import InvoicePrintView from '../components/InvoicePrintView';
 
 // Print styles are added globally or inline
 export default function CreateInvoicePage({ user: currentUser }: { user: User }) {
@@ -42,7 +43,7 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
 
   const fetchNextRef = async () => {
     try {
-      const { nextRef } = await fetchJson('/documents/next-ref?type=out');
+      const { nextRef } = await fetchJson(`/documents/next-ref?type=${docType}`);
       setRefNumber(nextRef);
     } catch (e) { console.error(e); }
   };
@@ -224,108 +225,7 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
           </button>
         </div>
         
-        {/* Printable Area - strictly reproducing the layout from PDF */}
-        <div className="bg-white p-6 mx-auto w-full max-w-[200mm] shadow print:shadow-none print:w-full print:p-4 font-sans text-sm border print:border-none">
-          <div className="bg-[#6c74ad] text-white flex justify-center py-3 mb-4 font-bold text-lg rounded-t-xl print:rounded-none" style={{ backgroundColor: '#6c74ad', printColorAdjust: 'exact' }}>
-            صورتحساب فروش کالا و خدمات (گالری پاپیتال)
-            {printedDoc.status === 'proforma' && ' - پیش فاکتور'}
-          </div>
-          <div className="flex justify-between items-center mb-2 text-xs">
-            <div className="font-bold">شماره فاکتور: {printedDoc.ref_number}</div>
-            <div className="font-bold">تاریخ: {new Date(printedDoc.date).toLocaleDateString('fa-IR')}</div>
-          </div>
-          
-          <table className="w-full mb-4 border-collapse print:text-[13px]">
-            <tbody>
-              <tr>
-                <td colSpan={4} className="bg-gray-100 text-center font-bold py-1 border" style={{ backgroundColor: '#f3f4f6', printColorAdjust: 'exact' }}>مشخصات فروشنده</td>
-              </tr>
-              <tr>
-                <td className="py-1 px-2 border w-1/4"><strong>نام فروشنده:</strong> گالری پاپیتال</td>
-                <td className="py-1 px-2 border w-1/4"><strong>استان / شهر:</strong> تهران / تهران</td>
-                <td colSpan={2} className="py-1 px-2 border"><strong>تلفن:</strong> 09308128622</td>
-              </tr>
-              <tr>
-                <td colSpan={4} className="py-1 px-2 border"><strong>نشانی:</strong> خیابان طالقانی، بن بست مسعود، پلاک 13</td>
-              </tr>
-
-              <tr>
-                <td colSpan={4} className="bg-gray-100 text-center font-bold py-1 border mt-2" style={{ backgroundColor: '#f3f4f6', printColorAdjust: 'exact' }}>مشخصات خریدار</td>
-              </tr>
-              <tr>
-                <td className="py-1 px-2 border w-1/4"><strong>نام خریدار:</strong> {printedDoc.buyer_name}</td>
-                <td className="py-1 px-2 border w-1/4"><strong>استان / شهر:</strong> {printedDoc.buyer_city}</td>
-                <td colSpan={2} className="py-1 px-2 border"><strong>تلفن:</strong> {printedDoc.buyer_phone}</td>
-              </tr>
-              <tr>
-                <td colSpan={4} className="py-1 px-2 border"><strong>نشانی:</strong> {printedDoc.buyer_address}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div className="bg-gray-100 text-center font-bold py-1 border border-b-0 print:text-[13px]" style={{ backgroundColor: '#f3f4f6', printColorAdjust: 'exact' }}>مشخصات کالا یا خدمات مورد معامله</div>
-          <table className="w-full text-center border-collapse border print:text-[12px] break-inside-auto">
-            <thead>
-              <tr className="bg-[#6c74ad] text-white" style={{ backgroundColor: '#6c74ad', printColorAdjust: 'exact' }}>
-                <th className="border p-1.5 font-medium">ردیف</th>
-                <th className="border p-1.5 font-medium">کد کالا</th>
-                <th className="border p-1.5 font-medium w-1/3">شرح کالا</th>
-                <th className="border p-1.5 font-medium">تعداد</th>
-                <th className="border p-1.5 font-medium">واحد</th>
-                <th className="border p-1.5 font-medium">مبلغ واحد</th>
-                <th className="border p-1.5 font-medium">مبلغ کل</th>
-                <th className="border p-1.5 font-medium">تخفیف</th>
-                <th className="border p-1.5 font-medium">مبلغ نهایی</th>
-              </tr>
-            </thead>
-            <tbody>
-              {printedDoc.items.map((item: any, idx: number) => {
-                const total = item.quantity * item.unit_price;
-                const final = total - item.discount;
-                return (
-                  <tr key={item.id} className="h-7 hover:bg-slate-50 break-inside-avoid">
-                    <td className="border p-1 font-medium bg-slate-50">{idx + 1}</td>
-                    <td className="border p-1 font-mono text-[11px]" dir="ltr">{item.code}</td>
-                    <td className="border p-1 font-bold">{item.name}</td>
-                    <td className="border p-1">{item.quantity}</td>
-                    <td className="border p-1">{item.unit}</td>
-                    <td className="border p-1">{item.unit_price.toLocaleString()}</td>
-                    <td className="border p-1">{total.toLocaleString()}</td>
-                    <td className="border p-1">{item.discount > 0 ? item.discount.toLocaleString() : ''}</td>
-                    <td className="border p-1 font-bold bg-slate-50">{final.toLocaleString()}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-
-          <table className="w-full mt-2 border-collapse print:text-[13px] break-inside-avoid">
-            <tbody>
-              <tr>
-                <td className="border p-2 align-top h-20" colSpan={4} rowSpan={3}>
-                  <strong>توضیحات:</strong> {printedDoc.notes}
-                </td>
-                <td className="border p-2 bg-gray-50 w-32 font-bold" style={{ backgroundColor: '#f9fafb', printColorAdjust: 'exact' }}>جمع کل:</td>
-                <td className="border p-2 w-40 text-left font-bold">{printedDoc.items.reduce((a:any, b:any)=>a+(b.quantity*b.unit_price),0).toLocaleString()}</td>
-              </tr>
-              <tr>
-                <td className="border p-2 bg-gray-50 font-bold" style={{ backgroundColor: '#f9fafb', printColorAdjust: 'exact' }}>تخفیف:</td>
-                <td className="border p-2 text-left font-bold">{printedDoc.items.reduce((a:any, b:any)=>a+b.discount,0).toLocaleString()}</td>
-              </tr>
-              <tr>
-                <td className="border p-2 bg-gray-200 font-bold" style={{ backgroundColor: '#e5e7eb', printColorAdjust: 'exact' }}>مبلغ نهایی:</td>
-                <td className="border p-2 text-left font-bold bg-gray-200" style={{ backgroundColor: '#e5e7eb', printColorAdjust: 'exact' }}>
-                  {(printedDoc.items.reduce((a:any, b:any)=>a+(b.quantity*b.unit_price),0) - printedDoc.items.reduce((a:any, b:any)=>a+b.discount,0)).toLocaleString()}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div className="mt-8 flex justify-between items-center text-center font-bold px-10">
-            <div>مهر و امضاء خریدار</div>
-            <div>مهر و امضاء فروشنده</div>
-          </div>
-        </div>
+        <InvoicePrintView printedDoc={printedDoc} />
       </div>
     );
   }
@@ -426,7 +326,7 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
                 >
                   <option value="">-- ورود دستی قیمت --</option>
                   {itemPrices.map(p => (
-                    <option key={p.id} value={p.price}>{p.title} - {p.price.toLocaleString()} {p.currency}</option>
+                    <option key={p.id} value={p.price}>{p.title} - {formatPersianPrice(p.price)} {p.currency}</option>
                   ))}
                 </select>
               </div>
@@ -469,15 +369,15 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
                     const rowFinal = rowTotal - d.discount;
                     return (
                     <tr key={i} className="hover:bg-slate-50">
-                      <td className="p-3 font-mono text-slate-500" dir="ltr">{d.item.code}</td>
+                      <td className="p-3 font-mono text-slate-500" dir="ltr">{formatPersianNumber(d.item.code)}</td>
                       <td className="p-3 font-bold text-slate-800">{d.item.name}</td>
                       <td className="p-3 text-center">
-                        <span className="font-bold">{d.quantity}</span> <span className="text-slate-500 text-xs">{d.item.unit}</span>
+                        <span className="font-bold">{formatPersianNumber(d.quantity)}</span> <span className="text-slate-500 text-xs">{d.item.unit}</span>
                       </td>
-                      <td className="p-3 text-center text-slate-700">{d.unitPrice.toLocaleString()}</td>
-                      <td className="p-3 text-center font-bold text-slate-700">{rowTotal.toLocaleString()}</td>
-                      <td className="p-3 text-center text-rose-600">{d.discount > 0 ? d.discount.toLocaleString() : '-'}</td>
-                      <td className="p-3 text-center font-bold text-indigo-700">{rowFinal.toLocaleString()}</td>
+                      <td className="p-3 text-center text-slate-700">{formatPersianPrice(d.unitPrice)}</td>
+                      <td className="p-3 text-center font-bold text-slate-700">{formatPersianPrice(rowTotal)}</td>
+                      <td className="p-3 text-center text-rose-600">{d.discount > 0 ? formatPersianPrice(d.discount) : '-'}</td>
+                      <td className="p-3 text-center font-bold text-indigo-700">{formatPersianPrice(rowFinal)}</td>
                       <td className="p-3 text-center">
                         <button type="button" onClick={() => handleRemove(d.item.id)} className="text-red-500 hover:text-red-700 bg-red-50 p-1.5 rounded transition-colors inline-block">
                           <Trash2 size={16} />
@@ -488,9 +388,9 @@ export default function CreateInvoicePage({ user: currentUser }: { user: User })
                 </tbody>
               </table>
               <div className="bg-slate-50 p-4 border-t flex justify-end gap-8 text-sm">
-                <div className="text-center font-medium text-slate-500">جمع کل: <span className="text-slate-800 font-bold block mt-1 text-lg">{totalSum.toLocaleString()}</span></div>
-                <div className="text-center font-medium text-slate-500">تخفیف: <span className="text-rose-600 font-bold block mt-1 text-lg">{totalDiscount.toLocaleString()}</span></div>
-                <div className="text-center font-medium text-indigo-600 bg-indigo-50 px-4 py-2 rounded-lg ml-0">مبلغ نهایی: <span className=" font-bold block mt-1 text-xl">{finalPrice.toLocaleString()} ریال</span></div>
+                <div className="text-center font-medium text-slate-500">جمع کل: <span className="text-slate-800 font-bold block mt-1 text-lg">{formatPersianPrice(totalSum)}</span></div>
+                <div className="text-center font-medium text-slate-500">تخفیف: <span className="text-rose-600 font-bold block mt-1 text-lg">{formatPersianPrice(totalDiscount)}</span></div>
+                <div className="text-center font-medium text-indigo-600 bg-indigo-50 px-4 py-2 rounded-lg ml-0">مبلغ نهایی: <span className=" font-bold block mt-1 text-xl">{formatPersianPrice(finalPrice)} ریال</span></div>
               </div>
             </div>
           )}

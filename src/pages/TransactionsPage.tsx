@@ -3,16 +3,30 @@ import { fetchJson } from '../api';
 import { Transaction } from '../types';
 import { Search, ArrowDownRight, ArrowUpRight, Download, ChevronRight, ChevronLeft } from 'lucide-react';
 import * as xlsx from 'xlsx';
+import DatePicker from "react-multi-date-picker";
+import persian from "react-date-object/calendars/persian";
+import persian_fa from "react-date-object/locales/persian_fa";
 
 export default function TransactionsPage() {
   const [txs, setTxs] = useState<Transaction[]>([]);
   const [search, setSearch] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  const [startDate, setStartDate] = useState<any>('');
+  const [endDate, setEndDate] = useState<any>('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
   const [loading, setLoading] = useState(false);
+
+  const formatToGregorian = (d: any): string => {
+    if (!d) return '';
+    if (d.toDate) {
+      return d.toDate().toISOString().split('T')[0];
+    }
+    if (d instanceof Date) {
+      return d.toISOString().split('T')[0];
+    }
+    return String(d);
+  };
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -22,8 +36,11 @@ export default function TransactionsPage() {
         limit: '50',
       });
       if (search) query.append('search', search);
-      if (startDate) query.append('startDate', startDate);
-      if (endDate) query.append('endDate', endDate);
+
+      const startStr = formatToGregorian(startDate);
+      const endStr = formatToGregorian(endDate);
+      if (startStr) query.append('startDate', startStr);
+      if (endStr) query.append('endDate', endStr);
 
       const res = await fetchJson(`/transactions?${query.toString()}`);
       if (res && res.data) {
@@ -55,8 +72,11 @@ export default function TransactionsPage() {
         export: 'true',
       });
       if (search) query.append('search', search);
-      if (startDate) query.append('startDate', startDate);
-      if (endDate) query.append('endDate', endDate);
+
+      const startStr = formatToGregorian(startDate);
+      const endStr = formatToGregorian(endDate);
+      if (startStr) query.append('startDate', startStr);
+      if (endStr) query.append('endDate', endStr);
 
       const fullData: Transaction[] = await fetchJson(`/transactions?${query.toString()}`);
 
@@ -106,20 +126,26 @@ export default function TransactionsPage() {
           <div className="flex gap-2 items-center flex-wrap">
              <div className="flex items-center gap-2 text-sm">
                <span className="text-slate-600">از:</span>
-               <input 
-                 type="date" 
-                 value={startDate}
-                 onChange={(e) => setStartDate(e.target.value)}
-                 className="p-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+               <DatePicker 
+                 value={startDate} 
+                 onChange={setStartDate} 
+                 calendar={persian} 
+                 locale={persian_fa} 
+                 calendarPosition="bottom-right"
+                 inputClass="p-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none w-32" 
+                 containerClassName="inline-block"
                />
              </div>
              <div className="flex items-center gap-2 text-sm">
                <span className="text-slate-600">تا:</span>
-               <input 
-                 type="date" 
-                 value={endDate}
-                 onChange={(e) => setEndDate(e.target.value)}
-                 className="p-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+               <DatePicker 
+                 value={endDate} 
+                 onChange={setEndDate} 
+                 calendar={persian} 
+                 locale={persian_fa} 
+                 calendarPosition="bottom-right"
+                 inputClass="p-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none w-32" 
+                 containerClassName="inline-block"
                />
              </div>
              {(startDate || endDate || search) && (

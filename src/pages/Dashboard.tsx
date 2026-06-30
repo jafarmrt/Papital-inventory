@@ -35,7 +35,7 @@ interface BIAlarm {
 }
 
 interface BITrend {
-  month: string;
+  date: string;
   type: 'in' | 'out';
   total: number;
 }
@@ -93,32 +93,33 @@ export default function Dashboard() {
     if (!biStats || !biStats.monthlyTrends.length) return { labels: [], ins: [], outs: [], maxVal: 10 };
     
     const monthMap: { [key: string]: { in: number; out: number } } = {};
+    const labelMap: { [key: string]: string } = {};
+
     biStats.monthlyTrends.forEach(t => {
-      if (!monthMap[t.month]) {
-        monthMap[t.month] = { in: 0, out: 0 };
+      // t.date is like "2026-06-29"
+      const d = new Date(t.date);
+      const ymKey = new Intl.DateTimeFormat('fa-IR-u-nu-latn', { year: 'numeric', month: '2-digit' }).format(d);
+      
+      if (!monthMap[ymKey]) {
+        monthMap[ymKey] = { in: 0, out: 0 };
+        const monthName = new Intl.DateTimeFormat('fa-IR', { month: 'long' }).format(d);
+        const yearStr = new Intl.DateTimeFormat('fa-IR', { year: 'numeric' }).format(d);
+        labelMap[ymKey] = `${monthName} ${yearStr}`;
       }
+      
       if (t.type === 'in') {
-        monthMap[t.month].in += t.total;
+        monthMap[ymKey].in += Number(t.total) || 0;
       } else {
-        monthMap[t.month].out += t.total;
+        monthMap[ymKey].out += Number(t.total) || 0;
       }
     });
 
-    const sortedMonths = Object.keys(monthMap).sort();
-    const ins = sortedMonths.map(m => monthMap[m].in);
-    const outs = sortedMonths.map(m => monthMap[m].out);
+    const sortedKeys = Object.keys(monthMap).sort();
+    const ins = sortedKeys.map(k => monthMap[k].in);
+    const outs = sortedKeys.map(k => monthMap[k].out);
     const maxVal = Math.max(...ins, ...outs, 10) * 1.15; // padding for chart height
 
-    // Format months to Persian month name if possible or keep as yyyy-mm
-    const fLabels = sortedMonths.map(m => {
-      const parts = m.split('-');
-      if (parts.length === 2) {
-        const mm = parseInt(parts[1], 10);
-        const monthsFa = ['', 'ژانویه', 'فوریه', 'مارس', 'آوریل', 'مه', 'ژوئن', 'ژوئیه', 'اوت', 'سپتامبر', 'اکتبر', 'نوامبر', 'دسامبر'];
-        return `${parts[0]}/${parts[1]}`;
-      }
-      return m;
-    });
+    const fLabels = sortedKeys.map(k => labelMap[k]);
 
     return { labels: fLabels, ins, outs, maxVal };
   };
@@ -349,7 +350,7 @@ export default function Dashboard() {
 
               <div className="bg-slate-50 p-3 rounded-lg border border-dashed mt-4">
                 <span className="text-[10px] text-slate-500 leading-relaxed block">
-                  💡 تخصیص و انتقال فیزیکی کالاها بین گاوصندوق، ویترین و کارگاه به صورت پویا با هماهنگی دقیق در رسید انبار و صدور اسناد انجام می‌پذیرد.
+                  💡 تخصیص و انتقال فیزیکی کالاها بین {(biStats?.warehouses && biStats.warehouses.length > 0) ? biStats.warehouses.map(w => w.name).join('، ') : 'انبارها'} به صورت پویا با هماهنگی دقیق در رسید انبار و صدور اسناد انجام می‌پذیرد.
                 </span>
               </div>
             </div>

@@ -1,4 +1,4 @@
-import { pgTable, text, serial, doublePrecision, integer, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, text, serial, doublePrecision, integer, jsonb, timestamp, index } from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -30,7 +30,7 @@ export const appSettings = pgTable('app_settings', {
 export const changelogs = pgTable('changelogs', {
   id: serial('id').primaryKey(),
   version: text('version').notNull(),
-  date: text('date').notNull(),
+  date: timestamp('date', { withTimezone: false, mode: 'string' }).notNull(),
   features: text('features').notNull(),
   fixes: text('fixes').notNull()
 });
@@ -45,14 +45,15 @@ export const customers = pgTable('customers', {
   city: text('city').default(''),
   address: text('address').default(''),
   notes: text('notes').default(''),
-  createdAt: text('created_at')
+  createdAt: timestamp('created_at', { mode: 'string' }).defaultNow(),
+  isDeleted: integer('is_deleted').default(0)
 });
 
 export const items = pgTable('items', {
   id: serial('id').primaryKey(),
   type: text('type').notNull(),
   name: text('name').notNull(),
-  code: text('code').notNull().unique(),
+  code: text('code').notNull(),
   currentStock: doublePrecision('current_stock').default(0),
   unit: text('unit').notNull(),
   category: text('category').default(''),
@@ -61,8 +62,16 @@ export const items = pgTable('items', {
   reorderPoint: doublePrecision('reorder_point').default(0),
   weightedAverageCost: doublePrecision('weighted_average_cost').default(0),
   stocks: jsonb('stocks').default({}), // Replaces dynamic columns stock_safe, etc.
+  color: text('color'),
+  weight: doublePrecision('weight'),
+  material: text('material'),
+  size: text('size'),
   isDeleted: integer('is_deleted').default(0),
-});
+}, (table) => ({
+  idx_type_deleted: index('items_type_deleted').on(table.type, table.isDeleted),
+  idx_code: index('items_code').on(table.code),
+  idx_category: index('items_category').on(table.category),
+}));
 
 export const transactions = pgTable('transactions', {
   id: serial('id').primaryKey(),
@@ -70,20 +79,25 @@ export const transactions = pgTable('transactions', {
   documentId: integer('document_id').references(() => documents.id),
   type: text('type').notNull(), // 'in' or 'out'
   quantity: doublePrecision('quantity').notNull(),
-  date: text('date').notNull(),
+  date: timestamp('date', { withTimezone: false, mode: 'string' }).notNull(),
   documentType: text('document_type'),
   documentRef: text('document_ref'),
-  user: text('user'),
+  createdBy: text('created_by'),
   notes: text('notes'),
   location: text('location').default('safe'),
   isDeleted: integer('is_deleted').default(0),
-});
+}, (table) => ({
+  idx_item: index('tx_item_id').on(table.itemId),
+  idx_doc: index('tx_doc_id').on(table.documentId),
+  idx_date: index('tx_date').on(table.date),
+  idx_type_deleted: index('tx_type_deleted').on(table.type, table.isDeleted),
+}));
 
 export const documents = pgTable('documents', {
   id: serial('id').primaryKey(),
   type: text('type').notNull(), 
   refNumber: text('ref_number').notNull(),
-  date: text('date').notNull(),
+  date: timestamp('date', { withTimezone: false, mode: 'string' }).notNull(),
   user: text('user'),
   notes: text('notes'),
   buyerName: text('buyer_name').default(''),
@@ -92,7 +106,10 @@ export const documents = pgTable('documents', {
   buyerAddress: text('buyer_address').default(''),
   status: text('status').default('final'),
   isDeleted: integer('is_deleted').default(0)
-});
+}, (table) => ({
+  idx_type_deleted: index('docs_type_deleted').on(table.type, table.isDeleted),
+  idx_date: index('docs_date').on(table.date),
+}));
 
 export const documentItems = pgTable('document_items', {
   id: serial('id').primaryKey(),
@@ -102,7 +119,10 @@ export const documentItems = pgTable('document_items', {
   unitPrice: doublePrecision('unit_price').default(0),
   discount: doublePrecision('discount').default(0),
   location: text('location').default('safe')
-});
+}, (table) => ({
+  idx_doc_id: index('doc_items_doc_id').on(table.documentId),
+  idx_item_id: index('doc_items_item_id').on(table.itemId),
+}));
 
 export const itemPrices = pgTable('item_prices', {
   id: serial('id').primaryKey(),
@@ -111,4 +131,6 @@ export const itemPrices = pgTable('item_prices', {
   price: doublePrecision('price').notNull(),
   currency: text('currency').default('IRR'),
   isDeleted: integer('is_deleted').default(0),
-});
+}, (table) => ({
+  idx_item_id: index('item_prices_item_id').on(table.itemId),
+}));

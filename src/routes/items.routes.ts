@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { sql, eq, and, desc, like, or } from 'drizzle-orm';
 import { orm } from '../db/drizzle.js';
-import { items, itemPrices, warehouses } from '../db/schema.js';
+import { items, itemPrices, warehouses, transactions } from '../db/schema.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { authorize } from '../middleware/authorize.js';
 import { z } from 'zod';
 import { validate } from '../middleware/validate.js';
 import { uploadBase64ToStorage } from '../lib/storage.js';
@@ -11,7 +12,18 @@ const router = Router();
 router.use(authenticateToken);
 
 const itemCreateUpdateSchema = z.object({
-  body: z.object({
+  body: z.preprocess((val: any) => {
+    if (val && typeof val === 'object') {
+      const copy = { ...val };
+      for (const k of Object.keys(copy)) {
+        if (k.startsWith('stock_')) {
+          delete copy[k];
+        }
+      }
+      return copy;
+    }
+    return val;
+  }, z.object({
     type: z.enum(['product', 'raw_material']).optional(),
     name: z.string().min(2, 'نام کالا باید حداقل ۲ کاراکتر باشد'),
     code: z.string().min(1, 'کد کالا الزامی است'),
@@ -20,8 +32,12 @@ const itemCreateUpdateSchema = z.object({
     image: z.string().optional(),
     thumbnail: z.string().optional(),
     reorder_point: z.union([z.string(), z.number()]).optional(),
-    weighted_average_cost: z.union([z.string(), z.number()]).optional()
-  }).passthrough()
+    weighted_average_cost: z.union([z.string(), z.number()]).optional(),
+    color: z.string().optional(),
+    weight: z.union([z.string(), z.number()]).optional(),
+    material: z.string().optional(),
+    size: z.string().optional()
+  }))
 });
 
 const itemPriceSchema = z.object({
@@ -99,9 +115,9 @@ router.get('/items', async (req, res) => {
   }
 });
 
-router.post('/items', validate(itemCreateUpdateSchema), async (req, res) => {
+router.post('/items', authorize('admin', 'manager'), validate(itemCreateUpdateSchema), async (req, res) => {
   try {
-    const { type, name, code, unit, category, image, thumbnail, reorder_point, weighted_average_cost } = req.body;
+    const { type, name, code, unit, category, image, thumbnail, reorder_point, weighted_average_cost, color, weight, material, size } = req.body;
     
     const [existing] = await orm.select({ id: items.id }).from(items).where(and(eq(items.code, code), eq(items.isDeleted, 0)));
     if (existing) {
@@ -125,15 +141,37 @@ router.post('/items', validate(itemCreateUpdateSchema), async (req, res) => {
     const [inserted] = await orm.insert(items).values({
         type, name, code, unit, category: category || '', image: imageUrl, thumbnail: thumbnailUrl,
         reorderPoint: Number(reorder_point || 0), weightedAverageCost: Number(weighted_average_cost || 0),
+        color: color || null, weight: weight ? Number(weight) : null, material: material || null, size: size || null,
         currentStock: computedStock,
         stocks: stockValues,
         isDeleted: 0
     }).returning({ id: items.id });
     
+    // Create initial stock transactions if any stock was provided
+    if (computedStock > 0) {
+      for (const whCode of Object.keys(stockValues)) {
+        const qty = stockValues[whCode];
+        if (qty > 0) {
+          await orm.insert(transactions).values({
+            itemId: inserted.id,
+            type: 'in',
+            quantity: qty,
+            date: new Date().toISOString().split('T')[0],
+            documentType: 'audit',
+            documentRef: 'ثبت اولیه کالا',
+            location: whCode,
+            notes: 'موجودی اولیه هنگام تعریف کالا',
+            createdBy: (req as any).user?.username || 'admin',
+          });
+        }
+      }
+    }
+
+    
     const responseStock: any = {};
     for (const k of Object.keys(stockValues)) responseStock[`stock_${k}`] = stockValues[k];
 
-    res.json({ id: inserted.id, type, name, code, current_stock: computedStock, unit, category, image: imageUrl, thumbnail: thumbnailUrl, ...responseStock, reorder_point, weighted_average_cost });
+    res.json({ id: inserted.id, type, name, code, current_stock: computedStock, unit, category, image: imageUrl, thumbnail: thumbnailUrl, ...responseStock, reorder_point, weighted_average_cost, color, weight, material, size });
   } catch (err: any) {
     if (err.code === '23505') {
       return res.status(400).json({ error: 'کد کالا تکراری است.' });
@@ -142,25 +180,14 @@ router.post('/items', validate(itemCreateUpdateSchema), async (req, res) => {
   }
 });
 
-router.put('/items/:id', validate(itemCreateUpdateSchema), async (req, res) => {
+router.put('/items/:id', authorize('admin', 'manager'), validate(itemCreateUpdateSchema), async (req, res) => {
   try {
     const itemId = Number(req.params.id);
-    const { name, code, unit, category, image, thumbnail, reorder_point, weighted_average_cost } = req.body;
+    const { name, code, unit, category, image, thumbnail, reorder_point, weighted_average_cost, color, weight, material, size } = req.body;
 
     const [existing] = await orm.select({ id: items.id }).from(items).where(and(eq(items.code, code), eq(items.isDeleted, 0)));
     if (existing && existing.id !== itemId) {
       return res.status(400).json({ error: 'کد کالا تکراری است و متعلق به محصول دیگری می باشد.' });
-    }
-
-    const whs = await orm.select({ code: warehouses.code }).from(warehouses);
-    let computedStock = 0;
-    const stockValues: Record<string, number> = {};
-
-    for (const wh of whs) {
-      const bodyKey = `stock_${wh.code}`;
-      const val = req.body[bodyKey] !== undefined ? Number(req.body[bodyKey]) : 0;
-      computedStock += val;
-      stockValues[wh.code] = val;
     }
 
     const imageUrl = image ? await uploadBase64ToStorage(image, 'image') : undefined;
@@ -168,9 +195,9 @@ router.put('/items/:id', validate(itemCreateUpdateSchema), async (req, res) => {
 
     const updateData: any = {
         name, code, unit, category: category || '',
-        reorderPoint: Number(reorder_point || 0), weightedAverageCost: Number(weighted_average_cost || 0),
-        currentStock: computedStock,
-        stocks: stockValues
+        reorderPoint: Number(reorder_point || 0),
+        weightedAverageCost: Number(weighted_average_cost || 0),
+        color: color || null, weight: weight ? Number(weight) : null, material: material || null, size: size || null
     };
     
     if (imageUrl !== undefined) updateData.image = imageUrl;
@@ -187,7 +214,7 @@ router.put('/items/:id', validate(itemCreateUpdateSchema), async (req, res) => {
   }
 });
 
-router.delete('/items/:id', async (req, res) => {
+router.delete('/items/:id', authorize('admin'), async (req, res) => {
   try {
     await orm.update(items).set({ isDeleted: 1 }).where(eq(items.id, Number(req.params.id)));
     res.json({ success: true });
@@ -255,16 +282,34 @@ router.post('/items/:id/prices', validate(itemPriceSchema), async (req, res) => 
   }
 });
 
+const bulkPriceSchema = z.object({
+  itemIds: z.array(z.number().int().positive()).min(1).max(500),
+  percentage: z.number().min(-100).max(1000),
+});
+
 router.post('/items/prices/bulk', async (req, res) => {
   try {
-    const { itemIds, percentage } = req.body;
-    if (!itemIds || !Array.isArray(itemIds)) return res.status(400).json({ error: 'invalid itemIds' });
+    const parsed = bulkPriceSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'اطلاعات ارسالی نامعتبر است', details: parsed.error.flatten().fieldErrors });
+    }
+    const { itemIds, percentage } = parsed.data;
     
     const multiplier = 1 + (percentage / 100);
     
     await orm.transaction(async (tx) => {
       for (const id of itemIds) {
-        await tx.execute(sql`UPDATE ${itemPrices} SET price = price * ${multiplier} WHERE item_id = ${id} AND is_deleted = 0`);
+        const pricesToUpdate = await tx.select({ id: itemPrices.id, price: itemPrices.price })
+          .from(itemPrices)
+          .where(and(eq(itemPrices.itemId, id), eq(itemPrices.isDeleted, 0)))
+          .for('update');
+          
+        for (const p of pricesToUpdate) {
+          const newPrice = Number(p.price) * multiplier;
+          await tx.update(itemPrices)
+            .set({ price: newPrice })
+            .where(eq(itemPrices.id, p.id));
+        }
       }
     });
     

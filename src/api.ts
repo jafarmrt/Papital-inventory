@@ -1,5 +1,7 @@
 export const API_URL = '/api';
 
+let isRedirecting = false;
+
 export async function fetchJson(endpoint: string, options?: RequestInit) {
   const token = localStorage.getItem('token');
   const headers: Record<string, string> = {
@@ -11,21 +13,30 @@ export async function fetchJson(endpoint: string, options?: RequestInit) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${endpoint}`, {
+      ...options,
+      headers,
+    });
+  } catch (err: any) {
+    throw new Error(`ارتباط با سرور برقرار نشد: ${err.message}`);
+  }
+
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     if (res.status === 401 || res.status === 403) {
         // Handle token expiration / logout
         if (typeof window !== 'undefined' && !endpoint.includes('/login')) {
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            window.location.href = '/';
+            if (!isRedirecting) {
+                isRedirecting = true;
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = '/';
+            }
         }
     }
-    throw new Error(data.error || 'Network response was not ok');
+    throw new Error(data.error || `Network error or server unavailable (${res.status})`);
   }
-  return res.json();
+  return res.json().catch(() => ({}));
 }

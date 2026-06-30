@@ -8,6 +8,10 @@ export interface Item {
   category?: string;
   image?: string;
   thumbnail?: string;
+  color?: string;
+  weight?: number;
+  material?: string;
+  size?: string;
 }
 
 export interface Transaction {

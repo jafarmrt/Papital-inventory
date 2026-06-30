@@ -7,19 +7,50 @@ import DatePicker from "react-multi-date-picker";
 import persian from "react-date-object/calendars/persian";
 import persian_fa from "react-date-object/locales/persian_fa";
 
-export default function DocumentsPage({ actionType, title, user: currentUser }: { actionType: 'in' | 'out', title: string, user: User }) {
+export default function DocumentsPage({ user: currentUser }: { user: User }) {
+  const [actionType, setActionType] = useState<'in' | 'out'>('in');
   const [items, setItems] = useState<Item[]>([]);
-  const [docType, setDocType] = useState(actionType === 'in' ? 'receipt' : 'invoice');
+  const [docType, setDocType] = useState('in');
   const [refNumber, setRefNumber] = useState('');
   const [date, setDate] = useState<any>(new Date());
   const [user, setUser] = useState(currentUser.full_name);
   const [warehouses, setWarehouses] = useState<{code: string, name: string}[]>([]);
   const [location, setLocation] = useState('safe');
+  const [buyerName, setBuyerName] = useState('');
+  const [returnInvoiceRef, setReturnInvoiceRef] = useState('');
+  const [notes, setNotes] = useState('');
 
   const [selectedItem, setSelectedItem] = useState('');
   const [quantity, setQuantity] = useState<number | ''>('');
   
   const [docItems, setDocItems] = useState<{item: Item, quantity: number}[]>([]);
+
+  const handleFetchReturnInvoice = async () => {
+    if (!returnInvoiceRef) return;
+    try {
+      const doc = await fetchJson(`/documents/by-ref/${returnInvoiceRef}?type=invoice`);
+      if (doc && doc.items) {
+        setBuyerName(doc.buyer_name || '');
+        const newDocItems = doc.items.map((i: any) => ({
+          item: { id: i.item_id, name: i.name, code: i.code, unit: i.unit },
+          quantity: i.quantity
+        }));
+        setDocItems(newDocItems);
+        setNotes(`برگشت از فاکتور فروش شماره ${returnInvoiceRef}`);
+        toast.success('اقلام فاکتور مرجع با موفقیت بارگذاری شد.');
+      }
+    } catch (e: any) {
+      toast.error('فاکتوری با این شماره یافت نشد.');
+    }
+  };
+
+  const fetchNextRef = async () => {
+    if (!docType) return;
+    try {
+      const { nextRef } = await fetchJson(`/documents/next-ref?type=${docType}`);
+      setRefNumber(nextRef);
+    } catch (e) { console.error(e); }
+  };
 
   useEffect(() => {
     fetchJson('/items?limit=0').then(res => {
@@ -32,11 +63,18 @@ export default function DocumentsPage({ actionType, title, user: currentUser }: 
         setLocation(whs[0].code);
       }
     }).catch(console.error);
+  }, []);
+
+  useEffect(() => {
     // reset form when actionType changes
-    setDocType(actionType === 'in' ? 'receipt' : 'invoice');
+    setDocType(actionType === 'in' ? 'receipt' : 'remittance');
     setDocItems([]);
-    setRefNumber('');
+    setBuyerName('');
   }, [actionType]);
+
+  useEffect(() => {
+    fetchNextRef();
+  }, [docType]);
 
   const handleAddItem = () => {
     if (!selectedItem) {
@@ -96,14 +134,18 @@ export default function DocumentsPage({ actionType, title, user: currentUser }: 
           date: formattedDate,
           user,
           location,
+          buyer_name: buyerName,
+          notes,
           inOut: actionType,
           items: docItems.map(d => ({ itemId: d.item.id, quantity: d.quantity }))
         })
       });
       toast.success('سند با موفقیت ثبت شد!');
       setDocItems([]);
-      setRefNumber('');
+      fetchNextRef();
       setUser('');
+      setBuyerName('');
+      setNotes('');
       // refresh items stock silently
       fetchJson('/items?limit=0').then(res => {
         if (res && res.data) setItems(res.data);
@@ -117,12 +159,25 @@ export default function DocumentsPage({ actionType, title, user: currentUser }: 
   return (
     <div className="space-y-6">
       <div className="bg-white border rounded-xl shadow-sm flex flex-col">
-        <div className="p-4 border-b flex justify-between items-center bg-white">
-          <h3 className="font-bold flex items-center gap-2">📝 {title}</h3>
+        <div className="flex border-b text-sm font-medium">
+          <button 
+            type="button" 
+            className={`flex-1 py-4 text-center border-b-2 transition-colors ${actionType === 'in' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+            onClick={() => setActionType('in')}
+          >
+            ورود به انبار (رسید)
+          </button>
+          <button 
+            type="button" 
+            className={`flex-1 py-4 text-center border-b-2 transition-colors ${actionType === 'out' ? 'border-blue-600 text-blue-600 bg-blue-50/50' : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'}`}
+            onClick={() => setActionType('out')}
+          >
+            خروج از انبار (حواله)
+          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div>
               <label className="block text-xs font-medium mb-1 text-slate-500">نوع سند</label>
               <select className="w-full border rounded text-sm px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500" value={docType} onChange={e => setDocType(e.target.value)}>
@@ -133,7 +188,6 @@ export default function DocumentsPage({ actionType, title, user: currentUser }: 
                   </>
                 ) : (
                   <>
-                    <option value="invoice">فاکتور فروش</option>
                     <option value="remittance">حواله خروج مصرف</option>
                     <option value="waste">ضایعات</option>
                   </>
@@ -143,6 +197,21 @@ export default function DocumentsPage({ actionType, title, user: currentUser }: 
             <div>
               <label className="block text-xs font-medium mb-1 text-slate-500">شماره سند / رفرنس</label>
               <input required type="text" value={refNumber} onChange={e => setRefNumber(e.target.value)} className="w-full border rounded text-sm px-3 py-1.5 text-left font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" dir="ltr" />
+            </div>
+            {docType === 'return' && (
+              <div>
+                <label className="block text-xs font-medium mb-1 text-slate-500">شماره فاکتور مرجع</label>
+                <div className="flex gap-2">
+                  <input type="text" value={returnInvoiceRef} onChange={e => setReturnInvoiceRef(e.target.value)} placeholder="مثال: 1005" className="w-full border rounded text-sm px-3 py-1.5 text-left font-mono focus:outline-none focus:ring-1 focus:ring-blue-500" dir="ltr" />
+                  <button type="button" onClick={handleFetchReturnInvoice} className="bg-slate-100 border text-slate-600 px-3 rounded hover:bg-slate-200 text-sm whitespace-nowrap">
+                    جستجو
+                  </button>
+                </div>
+              </div>
+            )}
+            <div>
+              <label className="block text-xs font-medium mb-1 text-slate-500">{actionType === 'in' ? 'تحویل دهنده' : 'گیرنده حواله'}</label>
+              <input required={actionType === 'out'} type="text" value={buyerName} onChange={e => setBuyerName(e.target.value)} placeholder={actionType === 'in' ? 'اختیاری...' : 'الزامی...'} className="w-full border rounded text-sm px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500" />
             </div>
             <div>
               <label className="block text-xs font-medium mb-1 text-slate-500">انبار</label>
@@ -165,8 +234,12 @@ export default function DocumentsPage({ actionType, title, user: currentUser }: 
               />
             </div>
             <div>
-              <label className="block text-xs font-medium mb-1 text-slate-500">کاربر / تحویل گیرنده</label>
+              <label className="block text-xs font-medium mb-1 text-slate-500">کاربر / صادرکننده</label>
               <input required type="text" value={user} onChange={e => setUser(e.target.value)} className="w-full border rounded text-sm px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium mb-1 text-slate-500">توضیحات</label>
+              <input type="text" value={notes} onChange={e => setNotes(e.target.value)} placeholder="توضیحات تکمیلی..." className="w-full border rounded text-sm px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500" />
             </div>
           </div>
 
@@ -211,7 +284,21 @@ export default function DocumentsPage({ actionType, title, user: currentUser }: 
                       <td className="p-3 font-mono">{d.item.code}</td>
                       <td className="p-3 font-bold">{d.item.name}</td>
                       <td className="p-3">
-                        <span className="font-bold text-blue-600">{d.quantity}</span> <span className="text-slate-500 text-xs">{d.item.unit}</span>
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="number" 
+                            min="0" 
+                            step="any"
+                            value={d.quantity} 
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setDocItems(prev => prev.map((item, idx) => idx === i ? { ...item, quantity: val } : item));
+                            }} 
+                            className="w-20 border rounded px-2 py-1 text-center text-sm" 
+                            dir="ltr"
+                          />
+                          <span className="text-slate-500 text-xs">{d.item.unit}</span>
+                        </div>
                       </td>
                       <td className="p-3 text-center">
                         <button type="button" onClick={() => handleRemove(d.item.id)} className="text-red-500 hover:text-red-700 bg-red-50 p-1.5 rounded transition-colors">

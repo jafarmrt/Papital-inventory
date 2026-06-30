@@ -10,6 +10,40 @@ import ConfirmModal from '../components/ConfirmModal';
 
 export default function ItemsPage({ type, title, user }: { type: 'product' | 'raw_material', title: string, user: User }) {
   const [items, setItems] = useState<Item[]>([]);
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc'|'desc' } | null>(null);
+  const [importErrors, setImportErrors] = useState<any[]>([]);
+
+  const sortedItems = React.useMemo(() => {
+    let sortableItems = [...items];
+    if (sortConfig !== null) {
+      sortableItems.sort((a: any, b: any) => {
+        let aVal = a[sortConfig.key];
+        let bVal = b[sortConfig.key];
+        
+        if (sortConfig.key === 'current_stock') {
+           aVal = a.current_stock;
+           bVal = b.current_stock;
+        }
+        
+        if (aVal < bVal) {
+          return sortConfig.direction === 'asc' ? -1 : 1;
+        }
+        if (aVal > bVal) {
+          return sortConfig.direction === 'asc' ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+    return sortableItems;
+  }, [items, sortConfig]);
+
+  const requestSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
   const { searchQuery: search, setSearchQuery: setSearch } = useSearch();
   const [showModal, setShowModal] = useState(false);
   const [confirmState, setConfirmState] = useState<{ isOpen: boolean; itemId: number }>({ isOpen: false, itemId: 0 });
@@ -29,7 +63,11 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
     image: '', 
     thumbnail: '',
     reorder_point: 0,
-    weighted_average_cost: 0
+    weighted_average_cost: 0,
+    color: '',
+    weight: '',
+    material: '',
+    size: ''
   });
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [codePrefix, setCodePrefix] = useState('');
@@ -148,16 +186,60 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
   }, [search]);
 
   const [allCategories, setAllCategories] = useState<{ id: number; name: string; prefix: string; type: string }[]>([]);
-  const [productYear, setProductYear] = useState(() => Intl.DateTimeFormat('en-US-u-ca-persian', {year: 'numeric'}).format(new Date()));
+  const [productYear, setProductYear] = useState(() => Intl.DateTimeFormat('en-US-u-ca-persian', {year: 'numeric'}).format(new Date()).replace(' AP', ''));
   const [productTransfer, setProductTransfer] = useState('');
 
-  const productFixedCategories = [
-    { name: 'گردنبند', prefix: 'N', unit: 'عدد' },
-    { name: 'گوشواره میخی', prefix: 'S', unit: 'جفت' },
-    { name: 'گوشواره آویز', prefix: 'E', unit: 'جفت' },
-    { name: 'انگشتر', prefix: 'R', unit: 'عدد' },
-    { name: 'دستبند', prefix: 'B', unit: 'عدد' },
-  ];
+  const [editingId, setEditingId] = useState<number | null>(null);
+  
+  const handleEdit = (item: any) => {
+    setEditingId(item.id);
+    
+    // Parse code parts if product
+    if (type === 'product' && item.code) {
+      const parts = item.code.split('-');
+      if (parts.length >= 4) {
+        setProductYear(parts[0]);
+        setProductTransfer(parts[2]);
+        setCodePrefix(`${parts[0]}-${parts[1]}-${parts[2]}-`);
+        setCodeNumber(parts[3]);
+      } else {
+        setCodePrefix('');
+        setCodeNumber(item.code);
+      }
+    } else if (type === 'raw_material' && item.code) {
+      const cat = allCategories.find(c => c.name === item.category);
+      const prefix = cat?.prefix || '';
+      setCodePrefix(prefix);
+      if (prefix && item.code.startsWith(prefix)) {
+        setCodeNumber(item.code.substring(prefix.length));
+      } else {
+        setCodeNumber(item.code);
+      }
+    }
+    
+    const initialStocks: Record<string, number> = {};
+    for (const w of warehouses) {
+      initialStocks[`stock_${w.code}`] = item[`stock_${w.code}`] || 0;
+    }
+    
+    setForm({
+      name: item.name || '',
+      code: item.code || '',
+      unit: item.unit || '',
+      category: item.category || '',
+      image: item.image || '',
+      thumbnail: item.thumbnail || '',
+      reorder_point: item.reorder_point || 0,
+      weighted_average_cost: item.weighted_average_cost || 0,
+      color: item.color || '',
+      weight: item.weight || '',
+      material: item.material || '',
+      size: item.size || '',
+      ...initialStocks
+    });
+    
+    setShowModal(true);
+  };
 
   const generateNextProductCode = async (catPrefix: string, transferRaw: string, yearRaw: string) => {
     if (!catPrefix || !transferRaw || !yearRaw) {
@@ -215,11 +297,42 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
     e.preventDefault();
     try {
       const finalCode = type === 'raw_material' ? `${codePrefix}${codeNumber}` : form.code;
-      await fetchJson('/items', {
-        method: 'POST',
-        body: JSON.stringify({ ...form, code: finalCode, type })
-      });
+      
+      const payload: any = {
+        name: form.name,
+        code: finalCode,
+        type,
+        unit: form.unit,
+        category: form.category,
+        image: form.image,
+        thumbnail: form.thumbnail,
+        reorder_point: form.reorder_point,
+        weighted_average_cost: form.weighted_average_cost,
+        color: form.color,
+        weight: form.weight,
+        material: form.material,
+        size: form.size
+      };
+
+      if (!editingId) {
+        for (const w of warehouses) {
+          payload[`stock_${w.code}`] = form[`stock_${w.code}`] || 0;
+        }
+      }
+
+      if (editingId) {
+        await fetchJson(`/items/${editingId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload)
+        });
+      } else {
+        await fetchJson('/items', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+      }
       setShowModal(false);
+      setEditingId(null);
       const initialStocks: Record<string, number> = {};
       for (const w of warehouses) {
         initialStocks[`stock_${w.code}`] = 0;
@@ -234,16 +347,21 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
         thumbnail: '',
         reorder_point: 0,
         weighted_average_cost: 0,
+        color: '',
+        weight: '',
+        material: '',
+        size: '',
         ...initialStocks
       });
       setCodePrefix('');
       setCodeNumber('');
       setProductTransfer('');
-      setProductYear(Intl.DateTimeFormat('en-US-u-ca-persian', {year: 'numeric'}).format(new Date()));
+      setProductYear(Intl.DateTimeFormat('en-US-u-ca-persian', {year: 'numeric'}).format(new Date()).replace(' AP', ''));
       loadItems();
       toast.success('کالا با موفقیت ثبت شد.');
-    } catch (err) {
-      toast.error('خطا در ثبت کالا، لطفا کد کالا را مجددا بررسی نمایید.');
+    } catch (err: any) {
+      toast.error(err.message || 'خطا در ثبت کالا، لطفا کد کالا را مجددا بررسی نمایید.');
+      console.error(err);
     }
   };
 
@@ -295,7 +413,10 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
         const data = xlsx.utils.sheet_to_json<any>(ws);
 
         let successCount = 0;
-        for (const row of data) {
+        const currentErrors: any[] = [];
+
+        for (let i = 0; i < data.length; i++) {
+          const row = data[i];
           const category = row['دسته‌بندی'] || row['دسته'] || row['category'] || '';
           const code = row['کد کالا'] || row['کد'] || row['code'] || new Date().getTime().toString() + Math.floor(Math.random() * 1000);
           const name = row['نام محصول'] || row['نام'] || row['name'];
@@ -315,24 +436,50 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
           const current_stock = Number(row['موجودی کل'] || row['موجودی فعلی'] || row['موجودی'] || row['stock']) || computedStock;
 
           if (name) {
-            await fetchJson('/items', {
-              method: 'POST',
-              body: JSON.stringify({ 
-                name, 
-                code: code.toString(), 
-                unit, 
-                type, 
-                category,
-                reorder_point: rPoint,
-                weighted_average_cost: avgCost,
-                current_stock,
-                ...stockValues
-              })
-            });
-            successCount++;
+            try {
+              await fetchJson('/items', {
+                method: 'POST',
+                body: JSON.stringify({ 
+                  name, 
+                  code: code.toString(), 
+                  unit, 
+                  type, 
+                  category,
+                  reorder_point: rPoint,
+                  weighted_average_cost: avgCost,
+                  current_stock,
+                  ...stockValues
+                })
+              });
+              successCount++;
+            } catch (err: any) {
+              currentErrors.push({
+                rowIndex: i + 2, // Excel headers are row 1, data starts at 2
+                name,
+                code: code.toString(),
+                error: err.message || 'خطای ناشناخته',
+                parsed: {
+                  name, 
+                  code: code.toString(), 
+                  unit, 
+                  type, 
+                  category,
+                  reorder_point: rPoint,
+                  weighted_average_cost: avgCost,
+                  current_stock,
+                  ...stockValues
+                }
+              });
+            }
           }
         }
-        toast.success(`${successCount} کالا با موفقیت از اکسل وارد شد.`);
+        if (successCount > 0) {
+          toast.success(`${successCount} کالا با موفقیت از اکسل وارد شد.`);
+        }
+        if (currentErrors.length > 0) {
+          toast.error(`${currentErrors.length} رکورد با خطا مواجه شدند.`);
+          setImportErrors(currentErrors);
+        }
         loadItems();
       } catch (err) {
         toast.error('خطا در پردازش فایل اکسل. لطفاً ساختار ستون‌ها را بر اساس خروجی سیستم هماهنگ کنید.');
@@ -376,7 +523,7 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
                 </button>
                 <input type="file" accept=".xlsx, .xls" className="hidden" ref={fileInputRef} onChange={handleImport} />
                 <button 
-                  onClick={() => setShowModal(true)}
+                  onClick={() => { setEditingId(null); setShowModal(true); }}
                   className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center gap-1"
                 >
                   <Plus size={14} />
@@ -410,19 +557,32 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
             <thead className="bg-slate-50 text-slate-500 border-b sticky top-0 text-xs z-0">
               <tr>
                 <th className="p-3 w-16">No.</th>
-                <th className="p-3 font-medium">دسته‌بندی</th>
-                <th className="p-3 font-medium">کد شناسایی</th>
-                <th className="p-3 font-medium">نام قلم کالا</th>
-                <th className="p-3 font-medium text-center">توزیع فیزیکی (گاوصندوق / کارگاه / نمایشگاه)</th>
-                <th className="p-3 font-medium text-center">نقطه سفارش</th>
-                <th className="p-3 font-medium text-center">ارزش خرید متحرک (WAC)</th>
-                <th className="p-3 font-medium text-center">کل موجودی</th>
+                <th className="p-3 font-medium cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => requestSort('category')}>
+                  دسته‌بندی {sortConfig?.key === 'category' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th className="p-3 font-medium cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => requestSort('code')}>
+                  کد شناسایی {sortConfig?.key === 'code' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th className="p-3 font-medium cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => requestSort('name')}>
+                  نام قلم کالا {sortConfig?.key === 'name' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th className="p-3 font-medium">مشخصات فنی</th>
+                <th className="p-3 font-medium text-center">توزیع فیزیکی</th>
+                <th className="p-3 font-medium text-center cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => requestSort('reorder_point')}>
+                  نقطه سفارش {sortConfig?.key === 'reorder_point' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th className="p-3 font-medium text-center cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => requestSort('weighted_average_cost')}>
+                  ارزش خرید متحرک (WAC) {sortConfig?.key === 'weighted_average_cost' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th className="p-3 font-medium text-center cursor-pointer hover:bg-slate-200 transition-colors" onClick={() => requestSort('current_stock')}>
+                  کل موجودی {sortConfig?.key === 'current_stock' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+                </th>
                 <th className="p-3 font-medium">واحد</th>
                 {user.role !== 'viewer' && <th className="p-3 font-medium text-center">عملیات</th>}
               </tr>
             </thead>
             <tbody className="divide-y text-xs">
-              {items.map((item, idx) => {
+              {sortedItems.map((item, idx) => {
                 const rPoint = (item as any).reorder_point || 0;
                 const avgCost = (item as any).weighted_average_cost || 0;
                 const isUnderReorder = item.current_stock <= rPoint && rPoint > 0;
@@ -449,6 +609,16 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
                     <td className="p-3 font-mono text-slate-600">{item.code}</td>
                     <td className="p-3 font-bold text-slate-850">{item.name}</td>
                     
+                    <td className="p-3 text-slate-500 text-xs text-right">
+                      <div className="flex flex-col gap-0.5">
+                        {item.color && <span>🎨 رنگ: {item.color}</span>}
+                        {item.weight && <span>⚖️ وزن: {item.weight} گرم</span>}
+                        {item.material && <span>💠 جنس: {item.material}</span>}
+                        {item.size && <span>📏 اندازه: {item.size} میلی‌متر</span>}
+                        {!item.color && !item.weight && !item.material && !item.size && <span className="text-slate-300">-</span>}
+                      </div>
+                    </td>
+
                     {/* Multi-Location inventory break-up */}
                     <td className="p-3 text-center">
                       <div className="flex flex-wrap justify-center items-center gap-1.5" dir="ltr">
@@ -503,12 +673,20 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
                     {/* Soft Delete Control */}
                     {user.role !== 'viewer' && (
                       <td className="p-3 text-center">
-                        <button
-                          onClick={() => setConfirmState({ isOpen: true, itemId: item.id })}
-                          className="bg-red-50 text-red-600 hover:bg-red-100 font-bold px-2 py-1 rounded text-[10px]"
-                        >
-                          آرشیو کالا
-                        </button>
+                        <div className="flex justify-center items-center gap-2">
+                          <button
+                            onClick={() => handleEdit(item)}
+                            className="bg-blue-50 text-blue-600 hover:bg-blue-100 font-bold px-2 py-1 rounded text-[10px]"
+                          >
+                            ویرایش
+                          </button>
+                          <button
+                            onClick={() => setConfirmState({ isOpen: true, itemId: item.id })}
+                            className="bg-red-50 text-red-600 hover:bg-red-100 font-bold px-2 py-1 rounded text-[10px]"
+                          >
+                            آرشیو
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -579,7 +757,7 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
                           value={productYear}
                           onChange={e => {
                             setProductYear(e.target.value);
-                            generateNextProductCode(productFixedCategories.find(c => c.name === form.category)?.prefix || '', productTransfer, e.target.value);
+                            generateNextProductCode(allCategories.find(c => c.name === form.category)?.prefix || '', productTransfer, e.target.value);
                           }}
                           className="w-full border rounded px-3 py-1.5 text-sm"
                           dir="ltr"
@@ -593,15 +771,15 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
                           value={form.category} 
                           onChange={e => {
                             const catName = e.target.value;
-                            const cat = productFixedCategories.find(c => c.name === catName);
-                            setForm({...form, category: catName, unit: cat?.unit || 'عدد'});
+                            const cat = allCategories.find(c => c.name === catName);
+                            setForm({...form, category: catName, unit: form.unit || 'عدد'});
                             generateNextProductCode(cat?.prefix || '', productTransfer, productYear);
                           }} 
                           className="w-full border rounded px-3 py-1.5 text-sm"
                         >
                           <option value="">- نوع محصول -</option>
-                          {productFixedCategories.map(c => (
-                            <option key={c.prefix} value={c.name}>{c.name} ({c.prefix})</option>
+                          {allCategories.map(c => (
+                            <option key={c.id} value={c.name}>{c.name} ({c.prefix})</option>
                           ))}
                         </select>
                       </div>
@@ -613,7 +791,7 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
                           value={productTransfer}
                           onChange={e => {
                             setProductTransfer(e.target.value);
-                            generateNextProductCode(productFixedCategories.find(c => c.name === form.category)?.prefix || '', e.target.value, productYear);
+                            generateNextProductCode(allCategories.find(c => c.name === form.category)?.prefix || '', e.target.value, productYear);
                           }}
                           className="w-full border rounded px-3 py-1.5 text-sm"
                           dir="ltr"
@@ -668,24 +846,26 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
                   </div>
                 </div>
               </div>
-              <div className="p-3 border rounded-lg bg-slate-50 space-y-3">
-                <span className="text-xs font-bold text-slate-500 block border-b pb-1">تخصیص موجودی اولیه به تفکیک انبارها</span>
-                <div className="grid grid-cols-3 gap-2">
-                  {warehouses.map(w => (
-                    <div key={w.code}>
-                      <label className="block text-[10px] font-medium mb-1 text-slate-600 truncate">📦 {w.name}</label>
-                      <input 
-                        type="number" 
-                        min="0" 
-                        step="any" 
-                        value={form[`stock_${w.code}`] || 0} 
-                        onChange={e => setForm({...form, [`stock_${w.code}`]: parseFloat(e.target.value) || 0})} 
-                        className="w-full border rounded-lg px-2 py-1 text-center font-mono text-xs bg-white" 
-                      />
-                    </div>
-                  ))}
+              {!editingId && (
+                <div className="p-3 border rounded-lg bg-slate-50 space-y-3">
+                  <span className="text-xs font-bold text-slate-500 block border-b pb-1">تخصیص موجودی اولیه به تفکیک انبارها</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {warehouses.map(w => (
+                      <div key={w.code}>
+                        <label className="block text-[10px] font-medium mb-1 text-slate-600 truncate">📦 {w.name}</label>
+                        <input 
+                          type="number" 
+                          min="0" 
+                          step="any" 
+                          value={form[`stock_${w.code}`] || 0} 
+                          onChange={e => setForm({...form, [`stock_${w.code}`]: parseFloat(e.target.value) || 0})} 
+                          className="w-full border rounded-lg px-2 py-1 text-center font-mono text-xs bg-white" 
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -704,7 +884,33 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
                   <input required type="text" placeholder="مثال: عدد، کیلوگرم" value={form.unit} onChange={e => setForm({...form, unit: e.target.value})} className="w-full border rounded-lg px-3 py-2 text-sm" />
                 </div>
               </div>
-              <div>
+
+              <div className="p-3 border rounded-lg bg-slate-50 space-y-3 mt-4">
+                <span className="text-xs font-bold text-slate-500 block border-b pb-1">مشخصات فنی (اختیاری)</span>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-slate-600">رنگ</label>
+                    <select value={form.color || ''} onChange={e => setForm({...form, color: e.target.value})} className="w-full border rounded-lg px-3 py-1.5 text-sm bg-white">
+                      <option value="">- انتخاب رنگ -</option>
+                      {['سفید', 'سیاه', 'قرمز', 'آبی', 'سبز', 'زرد', 'نارنجی', 'بنفش', 'صورتی', 'قهوه‌ای', 'خاکستری', 'طلایی', 'نقره‌ای', 'برنزی'].map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-slate-600">وزن (گرم)</label>
+                    <input type="number" min="0" step="any" value={form.weight || ''} onChange={e => setForm({...form, weight: e.target.value})} className="w-full border rounded-lg px-3 py-1.5 text-sm font-mono text-left bg-white" dir="ltr" placeholder="مثال: 5.5" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-slate-600">جنس</label>
+                    <input type="text" value={form.material || ''} onChange={e => setForm({...form, material: e.target.value})} className="w-full border rounded-lg px-3 py-1.5 text-sm bg-white" placeholder="مثال: طلا، نقره، چوب" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-slate-600">اندازه (میلی‌متر)</label>
+                    <input type="text" value={form.size || ''} onChange={e => setForm({...form, size: e.target.value})} className="w-full border rounded-lg px-3 py-1.5 text-sm font-mono text-left bg-white" dir="ltr" placeholder="مثال: 10x20" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4">
                 <label className="block text-sm font-medium mb-1">تصویر (اختیاری - حداکثر ۱۰۰ کیلوبایت)</label>
                 <input type="file" accept="image/*" onChange={handleImageChange} className="w-full border rounded-lg px-3 py-2 text-sm" />
                 {form.thumbnail && (
@@ -733,6 +939,94 @@ export default function ItemsPage({ type, title, user }: { type: 'product' | 'ra
         confirmText="بله، انتقال به آرشیو"
         cancelText="انصراف"
       />
+
+      {importErrors.length > 0 && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b flex justify-between items-center bg-slate-50 rounded-t-xl">
+              <h2 className="font-bold text-red-600">گزارش خطاهای ایمپورت ({importErrors.length} خطا)</h2>
+              <button onClick={() => setImportErrors([])} className="text-slate-500 hover:text-slate-700">✕</button>
+            </div>
+            <div className="p-4 overflow-auto flex-1">
+              <p className="text-sm text-slate-600 mb-4">
+                ردیف‌های زیر به دلیل خطا وارد نشدند. می‌توانید کد یا سایر مشخصات آن‌ها را ویرایش کرده و مجدداً تلاش کنید.
+              </p>
+              <div className="space-y-4">
+                {importErrors.map((err, idx) => (
+                  <div key={idx} className="border border-red-200 bg-red-50 p-4 rounded-lg">
+                    <div className="flex flex-wrap gap-4 items-start">
+                      <div className="flex-1 min-w-[200px]">
+                        <label className="block text-xs font-medium text-slate-700 mb-1">نام کالا (ردیف {err.rowIndex})</label>
+                        <input type="text" value={err.parsed.name} onChange={e => {
+                          const newErrs = [...importErrors];
+                          newErrs[idx].parsed.name = e.target.value;
+                          setImportErrors(newErrs);
+                        }} className="w-full border border-slate-300 rounded px-2 py-1 text-sm bg-white" />
+                      </div>
+                      <div className="w-32">
+                        <label className="block text-xs font-medium text-slate-700 mb-1">کد کالا</label>
+                        <input type="text" value={err.parsed.code} onChange={e => {
+                          const newErrs = [...importErrors];
+                          newErrs[idx].parsed.code = e.target.value;
+                          setImportErrors(newErrs);
+                        }} className="w-full border border-slate-300 rounded px-2 py-1 text-sm font-mono dir-ltr bg-white" />
+                      </div>
+                      <div className="w-48">
+                        <label className="block text-xs font-medium text-slate-700 mb-1">دسته‌بندی</label>
+                        <select value={err.parsed.category} onChange={e => {
+                          const newErrs = [...importErrors];
+                          newErrs[idx].parsed.category = e.target.value;
+                          setImportErrors(newErrs);
+                        }} className="w-full border border-slate-300 rounded px-2 py-1 text-sm bg-white">
+                          <option value="">بدون دسته</option>
+                          {allCategories.filter((c: any) => c.type === type).map((c: any) => (
+                            <option key={c.id} value={c.name}>{c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="w-24">
+                        <label className="block text-xs font-medium text-slate-700 mb-1">واحد</label>
+                        <input type="text" value={err.parsed.unit} onChange={e => {
+                          const newErrs = [...importErrors];
+                          newErrs[idx].parsed.unit = e.target.value;
+                          setImportErrors(newErrs);
+                        }} className="w-full border border-slate-300 rounded px-2 py-1 text-sm bg-white" />
+                      </div>
+                    </div>
+                    <div className="mt-3 text-sm text-red-600 font-bold bg-white px-2 py-1 rounded inline-block border border-red-200">
+                      علت خطا: {err.error}
+                    </div>
+                    <div className="mt-3 flex justify-end">
+                      <button 
+                        onClick={async () => {
+                          try {
+                            await fetchJson('/items', { method: 'POST', body: JSON.stringify(err.parsed) });
+                            toast.success(`کالا ${err.parsed.name} با موفقیت ثبت شد.`);
+                            const newErrs = importErrors.filter((_, i) => i !== idx);
+                            setImportErrors(newErrs);
+                            loadItems();
+                          } catch (e: any) {
+                            toast.error(e.message || 'مجدداً خطا رخ داد.');
+                            const newErrs = [...importErrors];
+                            newErrs[idx].error = e.message || 'خطای ناشناخته';
+                            setImportErrors(newErrs);
+                          }
+                        }}
+                        className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 shadow"
+                      >
+                        تلاش مجدد برای ثبت
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="p-4 border-t flex justify-end bg-slate-50 rounded-b-xl">
+              <button onClick={() => setImportErrors([])} className="px-4 py-2 border rounded-lg hover:bg-white text-sm">بستن پنجره</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

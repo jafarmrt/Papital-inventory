@@ -3,9 +3,20 @@ import { eq } from 'drizzle-orm';
 import { orm } from '../db/drizzle.js';
 import { warehouses } from '../db/schema.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { authorize } from '../middleware/authorize.js';
+import { z } from 'zod';
 
 const router = Router();
 router.use(authenticateToken);
+
+const warehouseSchema = z.object({
+  name: z.string().min(1, 'نام انبار الزامی است').max(100),
+  code: z.string().min(1, 'کد انبار الزامی است').max(50),
+});
+
+const warehouseUpdateSchema = z.object({
+  name: z.string().min(1, 'نام انبار الزامی است').max(100),
+});
 
 router.get('/warehouses', async (req, res) => {
   try {
@@ -14,9 +25,13 @@ router.get('/warehouses', async (req, res) => {
   } catch(err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/warehouses', async (req, res) => {
+router.post('/warehouses', authorize('admin'), async (req, res) => {
   try {
-    const { name, code } = req.body;
+    const parsed = warehouseSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'اطلاعات ارسالی نامعتبر است', details: parsed.error.flatten().fieldErrors });
+    }
+    const { name, code } = parsed.data;
     const cleanCode = code.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
     if (!cleanCode) {
       return res.status(400).json({ error: 'کد انبار نامعتبر است' });
@@ -24,18 +39,25 @@ router.post('/warehouses', async (req, res) => {
 
     const [info] = await orm.insert(warehouses).values({ name, code: cleanCode, isActive: 1 }).returning({ id: warehouses.id });
     res.json({ id: info.id, name, code: cleanCode, is_active: 1 });
-  } catch(err: any) { res.status(500).json({ error: err.message }); }
+  } catch(err: any) { 
+    console.error('POST /warehouses ERROR:', err);
+    res.status(500).json({ error: err.message }); 
+  }
 });
 
-router.put('/warehouses/:id', async (req, res) => {
+router.put('/warehouses/:id', authorize('admin'), async (req, res) => {
   try {
-    const { name } = req.body;
+    const parsed = warehouseUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'اطلاعات ارسالی نامعتبر است', details: parsed.error.flatten().fieldErrors });
+    }
+    const { name } = parsed.data;
     await orm.update(warehouses).set({ name }).where(eq(warehouses.id, Number(req.params.id)));
     res.json({ success: true });
   } catch(err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.delete('/warehouses/:id', async (req, res) => {
+router.delete('/warehouses/:id', authorize('admin'), async (req, res) => {
   try {
     const [wh] = await orm.select({ code: warehouses.code }).from(warehouses).where(eq(warehouses.id, Number(req.params.id))).limit(1);
     if (wh && wh.code === 'safe') {

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { orm } from '../db/drizzle.js';
 import { authenticateToken } from '../middleware/auth.js';
+import { authorize } from '../middleware/authorize.js';
 import { transactions, items } from '../db/schema.js';
 import { eq, desc, sql, and, gte, lte, or, ilike } from 'drizzle-orm';
 
@@ -43,7 +44,7 @@ router.get('/transactions', async (req, res) => {
       date: transactions.date,
       documentType: transactions.documentType,
       documentRef: transactions.documentRef,
-      user: transactions.user,
+      user: transactions.createdBy,
       notes: transactions.notes,
       location: transactions.location,
       isDeleted: transactions.isDeleted,
@@ -104,21 +105,30 @@ router.get('/transactions', async (req, res) => {
   }
 });
 
-router.delete('/transactions/:id', async (req, res) => {
+router.delete('/transactions/:id', authorize('admin'), async (req, res) => {
   try {
     const txId = parseInt(req.params.id);
     await orm.transaction(async (tx) => {
       const [transaction] = await tx.select().from(transactions).where(eq(transactions.id, txId));
       if (!transaction) return;
 
-      if (transaction.type === 'in') {
-        await tx.update(items)
-          .set({ currentStock: sql`${items.currentStock} - ${transaction.quantity}` })
-          .where(eq(items.id, transaction.itemId));
-      } else {
-        await tx.update(items)
-          .set({ currentStock: sql`${items.currentStock} + ${transaction.quantity}` })
-          .where(eq(items.id, transaction.itemId));
+      const loc = transaction.location || 'safe';
+      const qty = transaction.quantity;
+      const itemId = transaction.itemId;
+
+      const [itemData] = await tx.select({ stocks: items.stocks, currentStock: items.currentStock }).from(items).where(eq(items.id, itemId)).for('update');
+      if (itemData) {
+        const currentStocks = (itemData.stocks as Record<string, number>) || {};
+        const currentLocStock = Number(currentStocks[loc] || 0);
+        const oldTotalStock = Number(itemData.currentStock || 0);
+
+        if (transaction.type === 'in') {
+          currentStocks[loc] = currentLocStock - qty;
+          await tx.update(items).set({ stocks: currentStocks, currentStock: oldTotalStock - qty }).where(eq(items.id, itemId));
+        } else {
+          currentStocks[loc] = currentLocStock + qty;
+          await tx.update(items).set({ stocks: currentStocks, currentStock: oldTotalStock + qty }).where(eq(items.id, itemId));
+        }
       }
 
       await tx.delete(transactions).where(eq(transactions.id, txId));

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { sql, eq, and, gt, desc } from 'drizzle-orm';
+import { sql, eq, and, gt, desc, inArray } from 'drizzle-orm';
 import { orm } from '../db/drizzle.js';
 import { items, transactions, users, appSettings, warehouses } from '../db/schema.js';
 import { authenticateToken } from '../middleware/auth.js';
@@ -7,12 +7,18 @@ import { authenticateToken } from '../middleware/auth.js';
 const router = Router();
 router.use(authenticateToken);
 
+const dashboardCache = {
+  data: null as any,
+  timestamp: 0,
+  TTL: 30000 // 30 seconds
+};
+
 router.get('/stats', async (req, res) => {
   try {
     const [{ count: totalProducts }] = await orm.select({ count: sql<number>`count(*)` }).from(items).where(and(eq(items.type, 'product'), eq(items.isDeleted, 0)));
     const [{ count: totalMaterials }] = await orm.select({ count: sql<number>`count(*)` }).from(items).where(and(eq(items.type, 'raw_material'), eq(items.isDeleted, 0)));
     const [{ count: lowStock }] = await orm.select({ count: sql<number>`count(*)` }).from(items).where(and(eq(items.isDeleted, 0), sql`${items.currentStock} <= COALESCE(${items.reorderPoint}, 5)`));
-    const [{ count: recentTx }] = await orm.select({ count: sql<number>`count(*)` }).from(transactions).where(and(eq(transactions.isDeleted, 0), sql`${transactions.date} >= (current_date - interval '7 days')::text`));
+    const [{ count: recentTx }] = await orm.select({ count: sql<number>`count(*)` }).from(transactions).where(and(eq(transactions.isDeleted, 0), sql`${transactions.date}::timestamp >= (current_date - interval '7 days')`));
     const [{ count: userCount }] = await orm.select({ count: sql<number>`count(*)` }).from(users);
 
     res.json({
@@ -23,15 +29,24 @@ router.get('/stats', async (req, res) => {
       activeUsers: Number(userCount)
     });
   } catch (err: any) {
+    console.error('STATS ENDPOINT ERROR:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 router.get('/dashboard-bi-stats', async (req, res) => {
+  const now = Date.now();
+  if (dashboardCache.data && (now - dashboardCache.timestamp < dashboardCache.TTL)) {
+    return res.json(dashboardCache.data);
+  }
+
   try {
-    const [fastSetting] = await orm.select().from(appSettings).where(eq(appSettings.key, 'fast_moving_days'));
-    const [slowSetting] = await orm.select().from(appSettings).where(eq(appSettings.key, 'slow_moving_days'));
-    const [deadSetting] = await orm.select().from(appSettings).where(eq(appSettings.key, 'dead_stock_days'));
+    const settings = await orm.select().from(appSettings)
+      .where(inArray(appSettings.key, ['fast_moving_days', 'slow_moving_days', 'dead_stock_days']));
+    
+    const fastSetting = settings.find(s => s.key === 'fast_moving_days');
+    const slowSetting = settings.find(s => s.key === 'slow_moving_days');
+    const deadSetting = settings.find(s => s.key === 'dead_stock_days');
     
     const fastDays = fastSetting ? parseInt(fastSetting.value, 10) : 30;
     const slowDays = slowSetting ? parseInt(slowSetting.value, 10) : 90;
@@ -45,7 +60,7 @@ router.get('/dashboard-bi-stats', async (req, res) => {
       SELECT i.id, i.name, i.code, i.unit, SUM(t.quantity) as total_qty, i.current_stock
       FROM ${transactions} t
       JOIN ${items} i ON t.item_id = i.id
-      WHERE t.type = 'out' AND t.is_deleted = 0 AND t.date >= (current_date - (${fastDays} || ' days')::interval)::text
+      WHERE t.type = 'out' AND t.is_deleted = 0 AND t.date::timestamp >= current_date - (${fastDays}::int * interval '1 day')
       GROUP BY i.id, i.name, i.code, i.unit, i.current_stock
       ORDER BY total_qty DESC
       LIMIT 5
@@ -58,11 +73,11 @@ router.get('/dashboard-bi-stats', async (req, res) => {
       WHERE is_deleted = 0 AND current_stock > 0 
         AND id NOT IN (
           SELECT DISTINCT item_id FROM ${transactions} t
-          WHERE t.type = 'out' AND t.is_deleted = 0 AND t.date >= (current_date - (${slowDays} || ' days')::interval)::text
+          WHERE t.type = 'out' AND t.is_deleted = 0 AND t.date::timestamp >= current_date - (${slowDays}::int * interval '1 day')
         )
         AND id IN (
           SELECT DISTINCT item_id FROM ${transactions} t
-          WHERE t.type = 'out' AND t.is_deleted = 0 AND t.date >= (current_date - (${deadDays} || ' days')::interval)::text
+          WHERE t.type = 'out' AND t.is_deleted = 0 AND t.date::timestamp >= current_date - (${deadDays}::int * interval '1 day')
         )
       ORDER BY current_stock DESC
       LIMIT 5
@@ -75,13 +90,13 @@ router.get('/dashboard-bi-stats', async (req, res) => {
       WHERE is_deleted = 0 AND current_stock > 0 
         AND id NOT IN (
           SELECT DISTINCT item_id FROM ${transactions} t
-          WHERE t.type = 'out' AND t.is_deleted = 0 AND t.date >= (current_date - (${deadDays} || ' days')::interval)::text
+          WHERE t.type = 'out' AND t.is_deleted = 0 AND t.date::timestamp >= current_date - (${deadDays}::int * interval '1 day')
         )
         AND id IN (
           SELECT item_id FROM ${transactions} t
           WHERE t.type = 'in' AND t.is_deleted = 0
           GROUP BY item_id
-          HAVING min(t.date) < (current_date - (${deadDays} || ' days')::interval)::text
+          HAVING min(t.date::timestamp) < current_date - (${deadDays}::int * interval '1 day')
         )
       ORDER BY current_stock DESC
       LIMIT 5
@@ -97,28 +112,36 @@ router.get('/dashboard-bi-stats', async (req, res) => {
 
     const activeWarehouses = await orm.select({ name: warehouses.name, code: warehouses.code }).from(warehouses).where(eq(warehouses.isActive, 1));
     const distributionObj: Record<string, number> = {};
-    
-    if (activeWarehouses.length > 0) {
-      const allItems = await orm.select({ stocks: items.stocks }).from(items).where(eq(items.isDeleted, 0));
-      for (const w of activeWarehouses) {
-        let whTotal = 0;
-        for (const item of allItems) {
-          whTotal += Number((item.stocks as any)?.[w.code] || 0);
-        }
-        distributionObj[w.code] = whTotal;
+    for (const w of activeWarehouses) {
+      distributionObj[w.code] = 0;
+    }
+
+    const warehouseDistribution = await orm.execute(sql`
+      SELECT 
+        key as location, 
+        SUM(NULLIF(value, '')::numeric) as total_stock
+      FROM ${items}, jsonb_each_text(COALESCE(stocks, '{}'::jsonb))
+      WHERE is_deleted = 0
+      GROUP BY key
+      ORDER BY total_stock DESC
+    `);
+    for (const row of warehouseDistribution.rows) {
+      const loc = row.location as string;
+      if (loc in distributionObj) {
+        distributionObj[loc] = Number(row.total_stock);
       }
     }
 
     const trendsResult = await orm.execute(sql`
-      SELECT substring(date from 1 for 7) as month, type, SUM(quantity) as total
+      SELECT to_char(date::timestamp, 'YYYY-MM-DD') as date, type, SUM(quantity) as total
       FROM ${transactions}
-      WHERE is_deleted = 0 AND date >= (current_date - interval '6 months')::text
-      GROUP BY month, type
-      ORDER BY month ASC
+      WHERE is_deleted = 0 AND date::timestamp >= current_date - interval '6 months'
+      GROUP BY to_char(date::timestamp, 'YYYY-MM-DD'), type
+      ORDER BY date ASC
     `);
     const trends = trendsResult.rows;
 
-    res.json({
+    const result = {
       reorderAlarms: alarms,
       fastMoving: fastMoving,
       slowMoving: slowMoving,
@@ -130,8 +153,14 @@ router.get('/dashboard-bi-stats', async (req, res) => {
       fastDays,
       slowDays,
       deadDays
-    });
+    };
+
+    dashboardCache.data = result;
+    dashboardCache.timestamp = now;
+
+    res.json(result);
   } catch(err: any) {
+    console.error('BI-STATS ENDPOINT ERROR:', err);
     res.status(500).json({ error: err.message });
   }
 });
